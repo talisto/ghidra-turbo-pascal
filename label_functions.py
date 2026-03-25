@@ -60,6 +60,21 @@ BP_SYSTEM_LABELS = {
     '46d0': ('bp_random_seed',      'Random seed / RandSeed access'),
     '46e4': ('bp_random',           'Random(N) — generate random number'),
     '48da': ('bp_halt',             'Halt / RunError handler'),
+    # Additional large-binary System unit functions (seen in DDTEST / full TP7 RTL).
+    # These appear at higher offsets when more RTL features are linked in.
+    '0549': ('bp_textrec_init',     'TextRec buffer init (Assign / open association)'),
+    '05c7': ('bp_output_init',      'Unit output initializer (thin wrapper)'),
+    '0621': ('bp_text_open_check',  'Text file mode check / open for I/O'),
+    '0840': ('bp_writeln_impl',     'WriteLn implementation (large RTL variant)'),
+    '0861': ('bp_flush_text_cond',  'Conditional text buffer flush (large RTL)'),
+    '08de': ('bp_write_char_buf',   'Write character to TextRec buffer'),
+    '0964': ('bp_write_str_body',   'Write(Text, String, Word) inner body (large RTL)'),
+    '0e45': ('bp_str_append',       'String append / concatenation'),
+    '0e71': ('bp_str_val_scan',     'String scanning for Val()'),
+    '0eb7': ('bp_str_assign_cap',   'String assignment with length cap'),
+    '0ee2': ('bp_mkstr1',           'Build 1-char Pascal string from Char'),
+    '0f6e': ('bp_str_delete',       'Delete() — remove substring from string'),
+    '1e6d': ('bp_val_parse',        'Val() — parse string to integer value'),
 }
 
 # Core System RTL functions present in ALL TP7 binaries (even small ones).
@@ -133,6 +148,8 @@ RECORD_LABELS = {
 # Verified against DDTEST.EXE compiled from DDTEST.PAS with TP7.
 # These offsets are stable within the DDPlus unit across compilations.
 DDPLUS_LABELS = {
+    '00bb': ('ddp_str_input',       'DDPlus string input/copy helper'),
+    '0143': ('ddp_str_parse',       'DDPlus string parse/scan helper'),
     '0080': ('ddp_clear_region',    'DDPlus Clear_Region(x,r1,r2) — blank rows'),
     '06ad': ('ddp_time_left',       'DDPlus time_left — BBS minutes remaining'),
     '10bb': ('ddp_sendtext',        'DDPlus sendtext(s) — raw string to modem'),
@@ -149,6 +166,22 @@ DDPLUS_LABELS = {
     '211f': ('ddp_set_background',  'DDPlus set_background(color) — ANSI bg color'),
     '21da': ('ddp_set_color',       'DDPlus set_color(fg,bg) — set ANSI colors'),
     '281e': ('ddp_sgoto_xy',        'DDPlus sgoto_xy(x,y) — ANSI cursor move'),
+}
+
+# DDPlus IO utility unit — helper segment paired with the DDPlus driver.
+# Detected by the characteristic low-offset function cluster {0000, 004a, 00bb, 0143}.
+DDPLUS_IO_LABELS = {
+    '00bb': ('ddp_str_input',    'DDPlus string input/copy helper'),
+    '0143': ('ddp_str_parse',    'DDPlus string parse/scan helper'),
+}
+
+# Borland Pascal CRT unit (cursor, color, keyboard)
+# Detected by presence of WhereX (024b) and WhereY (0257) at stable offsets.
+CRT_UNIT_LABELS = {
+    '021f': ('crt_gotoxy_impl',   'GotoXY(X,Y) — cursor positioning with bounds check'),
+    '024b': ('crt_wherex_impl',   'WhereX — current cursor column (window-relative)'),
+    '0257': ('crt_wherey_impl',   'WhereY — current cursor row (window-relative)'),
+    '0263': ('crt_textattr_set',  'TextColor/TextBackground — set color attribute byte'),
 }
 
 # ── FLIRT Name Decoder ─────────────────────────────────────────────────────
@@ -367,6 +400,14 @@ def identify_by_pattern(func_name: str, func_body: str) -> tuple[str, str] | Non
     if '__WriteBlanks' in body and '__WriteBuffer' in body and body.count('\n') < 25:
         return ('bp_write_str', 'Write(Text, String, Word) — write string')
 
+    # Write(Text, String, Word) structural pattern — sub-functions not FLIRT-named:
+    # reads length byte from param_2, checks vs field width (param_1), writes if non-empty
+    if ('bVar1 = *param_2' in body and
+            'bVar1 < param_1' in body and
+            'bVar1 != 0' in body and
+            body.count('\n') < 25):
+        return ('bp_write_str', 'Write(Text, String, Word) — write string')
+
     # BIOS INT 10h wrapper: small function that just calls INT 10h
     if 'swi(0x10)' in body and body.count('\n') < 20:
         # Check no FUN_ calls in the code body (after opening brace)
@@ -386,6 +427,39 @@ def identify_by_pattern(func_name: str, func_body: str) -> tuple[str, str] | Non
         code_body = body[brace_pos:] if brace_pos >= 0 else body
         if 'FUN_' not in code_body:
             return ('bp_dos_int21', 'DOS INT 21h wrapper')
+
+    # Write char via __InOutProc + conditional WriteLn flush
+    if '__InOutProc' in body and '0x1a' in body and body.count('\n') < 25:
+        return ('bp_write_inoutproc', 'Write char via __InOutProc + conditional flush')
+
+    # Write(Text, Integer) — has FLIRT-named __Str2Int but sub-calls not FLIRT-named
+    if '__Str2Int' in body and 'in_CX' in body and body.count('\n') < 25:
+        return ('bp_write_int', 'Write(Text, Integer) — write integer')
+
+    # WriteLn / write char + flush: calls write sub-fn, then conditionally flushes
+    # Detected by use of in_ZF flag and TextRec flush function pointer at +0x1a
+    if ('in_ZF' in body and '0x1a' in body and
+            'FUN_' in body and body.count('\n') < 25):
+        return ('bp_write_char_flush', 'Write char + conditional WriteLn flush')
+
+    # Conditional flush only (no write): checks TextRec flush pointer, calls if set
+    brace_pos = body.find('{')
+    code_body = body[brace_pos:] if brace_pos >= 0 else body
+    if ('0x1a' in body and
+            code_body.count('FUN_') == 1 and
+            body.count('\n') < 22 and
+            'in_ZF' not in body):
+        return ('bp_flush_text_cond', 'Conditional text buffer flush')
+
+    # Bounded string copy: copies min(param_1, *param_3) bytes from param_3 to param_2
+    if ('param_1 < *param_3' in body and
+            '*param_2 = bVar1' in body and
+            body.count('\n') < 40):
+        return ('bp_str_copy_bounded', 'Bounded string copy: min(param_1, *param_3) bytes')
+
+    # Intr(IntNo, Regs): self-modifying code that patches swi(0) with actual intno
+    if 'swi(0)' in body and 'uRam' in body:
+        return ('dos_intr', 'Intr(IntNo, Regs) — call software interrupt')
 
     return None
 
@@ -505,6 +579,18 @@ def build_label_table(decompiled_text: str) -> dict[str, tuple[str, str]]:
                 if off in offsets:
                     labels[f'FUN_{seg}_{off}'] = (name, desc)
 
+        # DDPlus IO utility unit: identified by low-offset function cluster
+        elif '0000' in offsets and '004a' in offsets and '00bb' in offsets and '0143' in offsets:
+            for off, (name, desc) in DDPLUS_IO_LABELS.items():
+                if off in offsets:
+                    labels[f'FUN_{seg}_{off}'] = (name, desc)
+
+        # CRT unit: identified by WhereX (024b) and WhereY (0257)
+        elif '024b' in offsets and '0257' in offsets:
+            for off, (name, desc) in CRT_UNIT_LABELS.items():
+                if off in offsets:
+                    labels[f'FUN_{seg}_{off}'] = (name, desc)
+
     # --- Pattern-based identification ---
     # Analyze function bodies for code patterns
     func_bodies = extract_function_bodies(decompiled_text)
@@ -558,8 +644,8 @@ def label_line(line: str, labels: dict[str, tuple[str, str]],
     for m in matches:
         func_name = m.group(1)
         if func_name in labels:
-            short, desc = labels[func_name]
-            annotations.append(f'/* {short}: {desc} */')
+            _, desc = labels[func_name]
+            annotations.append(f'/* {desc} */')
 
     # Find FLIRT-named function calls
     if flirt_labels:
@@ -567,13 +653,37 @@ def label_line(line: str, labels: dict[str, tuple[str, str]],
         for m in flirt_matches:
             func_name = m.group(1)
             if func_name in flirt_labels:
-                short, desc = flirt_labels[func_name]
-                annotations.append(f'/* {short}: {desc} */')
+                _, desc = flirt_labels[func_name]
+                annotations.append(f'/* {desc} */')
 
     if not annotations:
         return line
 
     return stripped + '  ' + '  '.join(annotations) + '\n'
+
+
+def apply_renames(text: str, labels: dict[str, tuple[str, str]],
+                  flirt_labels: dict[str, tuple[str, str]] | None = None) -> str:
+    """Replace known function identifiers with their short labels throughout text.
+
+    Handles both FUN_xxxx_yyyy offset-based names and FLIRT-mangled names.
+    Skips any short name shared by more than one function to avoid creating
+    duplicate identifiers in the output.
+    """
+    name_count: dict[str, int] = {}
+    for _, (short, _) in labels.items():
+        name_count[short] = name_count.get(short, 0) + 1
+    if flirt_labels:
+        for _, (short, _) in flirt_labels.items():
+            name_count[short] = name_count.get(short, 0) + 1
+    for func_name, (short, _) in labels.items():
+        if name_count[short] == 1:
+            text = text.replace(func_name, short)
+    if flirt_labels:
+        for func_name, (short, _) in flirt_labels.items():
+            if name_count[short] == 1:
+                text = text.replace(func_name, short)
+    return text
 
 
 def main():
@@ -635,8 +745,10 @@ def main():
             labeled_count += 1
         out_lines.append(new_line.rstrip('\n'))
 
+    output_text = apply_renames('\n'.join(out_lines), labels, flirt_labels)
+
     with open(out_file, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(out_lines))
+        f.write(output_text)
 
     # Print summary
     print(f"Function Label Summary")

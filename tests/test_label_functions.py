@@ -195,8 +195,8 @@ class TestLabelLine:
         labels = {'FUN_10e6_0701': ('bp_write_str', 'Write string')}
         line = '  FUN_10e6_0701(0,0x51,0x10e6);\n'
         result = lf.label_line(line, labels)
-        assert 'bp_write_str' in result
         assert 'Write string' in result
+        assert '/* Write string */' in result
 
     def test_unlabeled_fun_unchanged(self):
         labels = {'FUN_10e6_0701': ('bp_write_str', 'Write string')}
@@ -209,20 +209,94 @@ class TestLabelLine:
         flirt_labels = {'_WriteLn_qm4Text': ('bp_writeln', 'WriteLn(Text)')}
         line = '  _WriteLn_qm4Text(0x178,unaff_DS);\n'
         result = lf.label_line(line, labels, flirt_labels)
-        assert 'bp_writeln' in result
+        assert 'WriteLn(Text)' in result
+        assert '/* WriteLn(Text) */' in result
+
+
+class TestApplyRenames:
+    """Test function renaming via apply_renames."""
+
+    def test_rename_in_declaration(self):
+        """FUN_* name in a function declaration is replaced with short name."""
+        text = 'void __stdcall16far FUN_1095_1d30(int param_1)  /* DDPlus ANSI color dispatch */\n'
+        labels = {'FUN_1095_1d30': ('ddp_ansi_dispatch', 'DDPlus ANSI color dispatch')}
+        result = lf.apply_renames(text, labels)
+        assert 'ddp_ansi_dispatch' in result
+        assert 'FUN_1095_1d30' not in result
+
+    def test_rename_in_call_site(self):
+        """FUN_* name in a call site is replaced with short name."""
+        text = '  FUN_1095_1d30(param_1, param_2);  /* DDPlus ANSI color dispatch */\n'
+        labels = {'FUN_1095_1d30': ('ddp_ansi_dispatch', 'DDPlus ANSI color dispatch')}
+        result = lf.apply_renames(text, labels)
+        assert 'ddp_ansi_dispatch(param_1, param_2)' in result
+        assert 'FUN_1095_1d30' not in result
+
+    def test_rename_in_function_header_comment(self):
+        """FUN_* name in the // Function: header comment is also replaced."""
+        text = '// Function: FUN_1095_1d30 @ 1095:1d30\n'
+        labels = {'FUN_1095_1d30': ('ddp_ansi_dispatch', 'DDPlus ANSI color dispatch')}
+        result = lf.apply_renames(text, labels)
+        assert '// Function: ddp_ansi_dispatch @ 1095:1d30' in result
+
+    def test_rename_all_occurrences(self):
+        """Every occurrence in the text is replaced, not just the first."""
+        text = 'FUN_1095_1d30(); FUN_1095_1d30(); FUN_1095_1d30();\n'
+        labels = {'FUN_1095_1d30': ('ddp_ansi_dispatch', 'DDPlus ANSI color dispatch')}
+        result = lf.apply_renames(text, labels)
+        assert result.count('FUN_1095_1d30') == 0
+        assert result.count('ddp_ansi_dispatch') == 3
+
+    def test_collision_skipped(self):
+        """Functions sharing a short name are not renamed (avoids duplicate identifiers)."""
+        text = 'FUN_1000_0001(); FUN_1000_0002();\n'
+        labels = {
+            'FUN_1000_0001': ('bp_write_str', 'desc1'),
+            'FUN_1000_0002': ('bp_write_str', 'desc2'),
+        }
+        result = lf.apply_renames(text, labels)
+        assert 'FUN_1000_0001' in result
+        assert 'FUN_1000_0002' in result
+
+    def test_unlabeled_fun_unchanged(self):
+        """FUN_* names not in the label table are left untouched."""
+        text = 'FUN_1000_9999();\n'
+        labels = {'FUN_1095_1d30': ('ddp_ansi_dispatch', 'DDPlus ANSI color dispatch')}
+        result = lf.apply_renames(text, labels)
+        assert 'FUN_1000_9999' in result
+
+    def test_flirt_rename(self):
+        """FLIRT-mangled names are replaced with their short labels."""
+        text = '  _Write_qm4Textm6String4Word(0xff,local_306,unaff_SS);\n'
+        flirt_labels = {'_Write_qm4Textm6String4Word': ('bp_write_str', 'Write(Text, String, Word)')}
+        result = lf.apply_renames(text, {}, flirt_labels)
+        assert 'bp_write_str' in result
+        assert '_Write_qm4Textm6String4Word' not in result
+
+    def test_flirt_rename_collision_skipped(self):
+        """FLIRT names sharing a short label are not renamed."""
+        text = '_Random_q4Word(); _Random_q7Integer();\n'
+        flirt_labels = {
+            '_Random_q4Word':    ('bp_random', 'Random(Word)'),
+            '_Random_q7Integer': ('bp_random', 'Random(N)'),
+        }
+        result = lf.apply_renames(text, {}, flirt_labels)
+        assert '_Random_q4Word' in result
+        assert '_Random_q7Integer' in result
 
 
 class TestLabelCoverage:
     """Regression tests for label coverage on test programs."""
 
-    # Programs that should have specific FLIRT functions (use actual mangled names)
+    # Programs that should have specific FLIRT functions (use actual mangled names
+    # matching what the sig files produce — verify against tests/output/*/decompiled.c)
     EXPECTED_FLIRT = {
-        'CRTTEST': ['_TextColor_q4Byte', '_GotoXY_q4Bytet1', '_ReadKey_qv'],
-        'DOSTEST': ['_GetDate_qm4Wordt1t1t1', '_DiskFree_q4Byte'],
-        'FILEIO': ['_Concat_qm6Stringt1', '_Erase_qm4File'],
-        'PTRMEM': ['_GetMem_q4Word', '_FreeMem_qm7Pointer4Word'],
-        'RANDTEST': ['_Random_q4Word'],
-        'STRINGS': ['_Concat_qm6Stringt1', '_Pos_qm6Stringt1'],
+        'CRTTEST': ['_AssignCrt_qm4Text', '_Write_qm4Text4Char4Word'],
+        'DOSTEST': ['_DiskSize_q4Byte', '_FindNext_qm9SearchRec'],
+        'FILEIO':  ['_Delete_qm6String7Integert2', '_Eof_qm4File', '_Rename_qm4Filem6String'],
+        'PTRMEM':  ['_Write_qm4Text7Boolean4Word', '_Write_qm4Text7Longint4Word'],
+        'RANDTEST': ['_Randomize_qv'],
+        'STRINGS': ['_Delete_qm6String7Integert2', '_UpCase_q4Char'],
     }
 
     @pytest.mark.parametrize('program,expected_fns', list(EXPECTED_FLIRT.items()))
