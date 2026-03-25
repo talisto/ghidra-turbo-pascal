@@ -1,0 +1,74 @@
+"""test_decompile_output.py — Validate decompiled output structure.
+
+Tests run against pre-generated output in tests/output/ — they don't
+invoke Ghidra. Run the full pipeline first via run_tests.sh or decompile.sh.
+"""
+import os
+import re
+import pytest
+from conftest import OUTPUT_DIR
+
+
+# Minimum expected function counts per program (from Ghidra analysis)
+MIN_FUNCTIONS = {
+    'HELLO':    28,
+    'CONTROL':  35,
+    'CRTTEST':  60,
+    'DDTEST':  290,
+    'DOSTEST':  55,
+    'EXITPROC': 34,
+    'FILEIO':   80,
+    'GAMESIM':  48,
+    'MATHOPS':  49,
+    'PROCFUNC': 44,
+    'PTRMEM':   55,
+    'RANDTEST': 41,
+    'RECORDS':  47,
+    'STRINGS':  43,
+    'TYPECAST': 35,
+}
+
+
+class TestDecompiledOutput:
+    """Validate the raw decompiled.c output from Ghidra."""
+
+    def test_output_files_exist(self, program):
+        """All three pipeline output files must exist."""
+        prog_dir = os.path.join(OUTPUT_DIR, program)
+        assert os.path.isfile(os.path.join(prog_dir, 'decompiled.c'))
+        assert os.path.isfile(os.path.join(prog_dir, 'decompiled.annotated.c'))
+        assert os.path.isfile(os.path.join(prog_dir, 'decompiled.labeled.c'))
+
+    def test_minimum_functions(self, program, decompiled_text):
+        """Each program should decompile to at least MIN_FUNCTIONS functions."""
+        func_count = len(re.findall(r'^// Function:', decompiled_text, re.MULTILINE))
+        min_count = MIN_FUNCTIONS.get(program, 5)
+        assert func_count >= min_count, (
+            f"{program} has {func_count} functions, expected >= {min_count}")
+
+    def test_has_function_headers(self, decompiled_text, program):
+        """Every function should have the expected header format."""
+        headers = re.findall(
+            r'^// Function: (\S+) @ ([0-9a-f]+:[0-9a-f]+)$',
+            decompiled_text, re.MULTILINE)
+        assert len(headers) > 0, f"{program} has no function headers"
+        # Each header should have a valid seg:off address
+        for name, addr in headers:
+            seg, off = addr.split(':')
+            assert len(seg) == 4, f"Bad segment in {name}: {seg}"
+            assert len(off) == 4, f"Bad offset in {name}: {off}"
+
+    def test_no_decompiler_errors(self, decompiled_text, program):
+        """Output should not contain Ghidra error markers."""
+        # These indicate decompilation failures
+        assert 'BADSPACEBASE' not in decompiled_text, f"{program} has BADSPACEBASE"
+        assert 'Low-level Error' not in decompiled_text, f"{program} has Low-level Error"
+
+    def test_has_flirt_functions(self, decompiled_text, program):
+        """Every TP7 binary should have at least some FLIRT-identified functions."""
+        # FLIRT names have patterns like @Write$q... (rendered as _Write_q...)
+        flirt_funcs = re.findall(
+            r'_[A-Za-z]\w*_q[A-Za-z0-9]+|__[A-Z][A-Za-z]+',
+            decompiled_text)
+        assert len(flirt_funcs) > 0, (
+            f"{program} has no FLIRT-identified functions")

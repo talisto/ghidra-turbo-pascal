@@ -1,0 +1,36 @@
+# DDPlus 7.1 Door Driver Toolkit — FLIRT function mapping
+#
+# Format: hex_offset flirt_name
+# Lines starting with # are comments. Blank lines are ignored.
+#
+# Source EXE: DDTEST.EXE (compiled from DDTEST.PAS with TP7)
+# Ghidra segment: 0x1095 (actual segment 0x0095 with base 0x1000)
+#
+# FLIRT names use _Name_qParams convention:
+#   _qv = no parameters (void)
+#   _q4Byte = one Byte parameter
+#   _q6String = one String parameter
+#   t1, t2 = repeated parameter types
+#   m = var parameter prefix
+#
+# See sigs/README.md for full mangling rules.
+
+0080 _Clear_Region_q4Bytet1t2
+0539 _elapsed_q7Longintt1t2t3t4t5m4Wordt1t2
+06ad _time_left_qv
+073e _Time_used_qv
+10bb _sendtext_q6String
+1129 _morecheck_qv
+11b7 _sclrscr_qv
+1209 _sclreol_qv
+12a4 _swritec_q4Char
+130c _swrite_q6String
+13b6 _swriteln_q6String
+14e0 _swritexy_q7Integert16String
+1590 _Propeller_q4Byte
+1d30 _ansi_dispatch_qv
+1d95 _set_foreground_q4Byte
+211f _set_background_q4Byte
+21da _set_color_q4Bytet1
+281e _sgoto_xy_q7Integert1
+2905 _skeypressed_qv
