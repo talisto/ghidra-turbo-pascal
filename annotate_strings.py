@@ -40,25 +40,10 @@ def ovr_file_offset(ghidra_linear: int) -> int:
 
 # ── String reading ───────────────────────────────────────────────────────────
 
-def _is_lord_printable(b: int) -> bool:
-    """Byte counts as printable for a LORD display string.
-    Includes standard ASCII, LORD backtick colour codes, CP437 high bytes.
-    """
-    return (0x20 <= b <= 0x7e) or (0x80 <= b <= 0xfe) or b in (0x09, 0x0a, 0x0d)
-
 def _render(raw: bytes) -> str:
-    """Render raw Pascal string bytes to a human-readable summary.
-    LORD uses backtick colour codes like `2, `0, `%, `4, `5, `c.
-    Control bytes 0x01-0x1f with printable context are format markers.
-    """
+    """Render raw Pascal string bytes to a human-readable annotation string."""
     out = []
-    i = 0
-    while i < len(raw):
-        b = raw[i]
-        if b == 0x60 and i + 1 < len(raw):          # backtick colour code
-            out.append(f'`{chr(raw[i+1])}')
-            i += 2
-            continue
+    for b in raw:
         if 0x20 <= b <= 0x7e:
             out.append(chr(b))
         elif b == 0x0a:
@@ -67,13 +52,10 @@ def _render(raw: bytes) -> str:
             out.append('\\r')
         elif b == 0x09:
             out.append('\\t')
-        elif b == 0x01:
-            out.append(' ')               # common separator in LORD
-        elif 0x02 <= b <= 0x1f:
-            out.append(f'\\x{b:02x}')    # other control; keep visible
+        elif b <= 0x1f:
+            out.append(f'\\x{b:02x}')
         else:
-            out.append(chr(b))           # CP437 high byte
-        i += 1
+            out.append(chr(b))           # high byte (0x80-0xff)
     return ''.join(out)
 
 def try_read_pascal(data: bytes, offset: int, min_len: int = 3, max_len: int = 200,
@@ -88,10 +70,8 @@ def try_read_pascal(data: bytes, offset: int, min_len: int = 3, max_len: int = 2
     - The length byte must indicate min_len..max_len content bytes
     - At least 60% of content bytes must be letter/digit/space/punctuation
     - At least 50% must be standard printable ASCII
-    - The first 3 content bytes must all be "displayable" (printable ASCII,
-      backtick colour code, or LORD control byte 0x01-0x1F that a display
-      function could interpret) — this catches false positives where machine
-      code bytes precede a real string in memory
+    - The first 3 content bytes must all be printable ASCII — this catches
+      false positives where machine code bytes precede a real string in memory
     """
     if offset < 0 or offset + 1 >= len(data):
         return None
@@ -104,18 +84,14 @@ def try_read_pascal(data: bytes, offset: int, min_len: int = 3, max_len: int = 2
 
     # --- Clean-start check ---
     # Byte 0 (first content byte) must be printable ASCII (0x20-0x7e).
-    # LORD strings always start with visible text, a space, or a backtick colour
-    # code.  Control bytes 0x01-0x1f appear as placeholder tokens WITHIN strings
-    # but never at position 0.
     b0 = raw[0]
     if not (0x20 <= b0 <= 0x7e):
         return None
 
-    # Bytes 1 through 5 must be printable ASCII (0x20-0x7e).  Real LORD
-    # strings consist of text, spaces, and backtick colour codes — all
-    # printable.  Allowing control codes (0x01-0x1f) here was too permissive
-    # and let machine-code bytes like 0x17, 0x1e pass, creating false long
-    # strings that swallowed real adjacent strings.
+    # Bytes 1 through 5 must also be printable ASCII (0x20-0x7e).
+    # Allowing control codes (0x01-0x1f) here was too permissive and let
+    # machine-code bytes like 0x17, 0x1e pass, creating false long strings
+    # that swallowed real adjacent strings.
     for i in range(1, min(6, plen)):
         b = raw[i]
         if not (0x20 <= b <= 0x7e):
@@ -136,8 +112,7 @@ def try_read_pascal(data: bytes, offset: int, min_len: int = 3, max_len: int = 2
                        or (0x61 <= b <= 0x7a)    # a-z
                        or (0x30 <= b <= 0x39)    # 0-9
                        or b in (0x20, 0x21, 0x22, 0x27, 0x28, 0x29,  # space ! " ' ( )
-                                0x2c, 0x2e, 0x3a, 0x3f,               # , . : ?
-                                0x60))                                  # backtick (LORD color)
+                                0x2c, 0x2e, 0x3a, 0x3f))              # , . : ?
     if letter_bytes < plen * min_letter_ratio:
         return None
 
