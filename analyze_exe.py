@@ -221,6 +221,11 @@ KNOWN_STRING_FUNCS = {
     '3f65': 'str_copy',
     '3fca': 'str_concat',
     '4067': 'char_to_str',
+    # Borland Pascal RTL: assigns a constant string from segment data.
+    # Called as _Delete_qm6String7Integert2(local_off, seg) where local_off
+    # is a segment-relative offset into the unit's data area.  The string
+    # lives at image_off = (seg - 0x1000) * 16 + local_off.
+    '_delete_qm6string7integert2': 'bp_str_assign_const (segment-relative)',
 }
 
 def build_xref(decompiled_path: str, string_table: list[dict]) -> list[dict]:
@@ -247,14 +252,14 @@ def build_xref(decompiled_path: str, string_table: list[dict]) -> list[dict]:
                 a = int(m.group(1), 16)
                 b = int(m.group(2), 16)
 
-                # Try a as image offset (b as segment)
-                if a in str_lookup and 0x1000 <= b <= 0x7FFF:
-                    # Find the calling function name
-                    call_func = "?"
-                    fm = _FUNC_RE.search(line[:m.start()])
-                    if fm:
-                        call_func = fm.group(1)
+                # Determine calling function name for the xref record
+                call_func = "?"
+                fm = _FUNC_RE.search(line[:m.start()])
+                if fm:
+                    call_func = fm.group(1)
 
+                # Try a as image offset (b as segment selector)
+                if a in str_lookup and 0x1000 <= b <= 0x7FFF:
                     xrefs.append({
                         'line_num': line_num,
                         'function': current_func,
@@ -263,6 +268,35 @@ def build_xref(decompiled_path: str, string_table: list[dict]) -> list[dict]:
                         'segment': b,
                         'text': str_lookup[a],
                     })
+                # Try b as image offset (a as segment selector)
+                # Ghidra may swap argument order in some calling conventions.
+                elif b in str_lookup and 0x1000 <= a <= 0x7FFF:
+                    xrefs.append({
+                        'line_num': line_num,
+                        'function': current_func,
+                        'call_func': call_func,
+                        'image_off': b,
+                        'segment': a,
+                        'text': str_lookup[b],
+                    })
+                else:
+                    # Segment-relative path: for cross-unit string references
+                    # (e.g. _Delete_qm6String7Integert2(local_off, seg)),
+                    # local_off is an offset *within* the segment's data area.
+                    # image_off = (seg - 0x1000) * 16 + local_off
+                    for offset, seg in ((a, b), (b, a)):
+                        if 0x1000 <= seg <= 0x7FFF:
+                            img_off = (seg - 0x1000) * 16 + offset
+                            if img_off in str_lookup:
+                                xrefs.append({
+                                    'line_num': line_num,
+                                    'function': current_func,
+                                    'call_func': call_func,
+                                    'image_off': img_off,
+                                    'segment': seg,
+                                    'text': str_lookup[img_off],
+                                })
+                                break
 
     return xrefs
 
