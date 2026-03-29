@@ -50,11 +50,12 @@ class TestBuildLabelTable:
         assert len(labels) <= max_labels, (
             f"{program}: {len(labels)} labels seems too many")
 
-    def test_ddplus_labels_detected(self, decompiled_text, program):
+    def test_ddplus_labels_detected(self):
         """DDPlus door driver functions should be labeled in DDTEST."""
-        if program != 'DDTEST':
-            pytest.skip('DDPlus labels only expected in DDTEST')
-        labels = lf.build_label_table(decompiled_text)
+        path = 'tests/output/DDTEST/decompiled.c'
+        with open(path, encoding='utf-8', errors='replace') as f:
+            text = f.read()
+        labels = lf.build_label_table(text)
         names = {short for _, (short, _) in labels.items()}
         expected_ddp = {
             'ddp_swriteln', 'ddp_swrite', 'ddp_sclrscr', 'ddp_sgoto_xy',
