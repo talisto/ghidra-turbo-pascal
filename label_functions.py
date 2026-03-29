@@ -236,8 +236,11 @@ FLIRT_DESCRIPTIONS = {
     # Double-underscore variants emitted by some Ghidra/FLIRT sig versions
     '__basg_qm6Stringt1':            ('bp_str_assign',      'String assignment'),
     '__basg_qm6Stringt14Byte':       ('bp_str_assign_n',    'String assignment with max length'),
-    # BP7 stack overflow check — called at function entry with stack frame size
-    '_bp_stackcheck_q4Word':         ('bp_stack_check',     'Stack overflow check / function stack frame init'),
+    # BP7 stack overflow check — called at function entry with stack frame size.
+    # Semantically identical to the offset-0530 label bp_unit_init; using the
+    # same short name ensures FLIRT-identified and offset-identified files both
+    # render consistently without triggering the name-collision dedup guard.
+    '_bp_stackcheck_q4Word':         ('bp_unit_init',       'Unit initialization / stack check'),
     '_IOResult_qv':                  ('bp_ioresult',        'IOResult — last I/O result code'),
     '_UpCase_q4Char':                ('bp_upcase',          'UpCase(Char) — convert to uppercase'),
     '_RunError_q4Byte':              ('bp_runerror',        'RunError(Byte) — trigger runtime error'),
