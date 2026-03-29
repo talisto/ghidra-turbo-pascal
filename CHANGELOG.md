@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.2.1] - 2026-03-25
+## [1.2.2] - 2026-03-29
+
+### Added
+- `annotate_strings.py`: segment-relative string resolution — for cross-unit string references like `FUN_265c_02a8(0x3571, 0x32e9)`, the annotator now also tries `(seg - 0x1000) * 16 + offset` as the image address in addition to the existing absolute-offset path; this resolves strings in `_Delete_qm6String7Integert2` calls and other inter-unit display calls that were previously silently skipped
+- `label_functions.py`: added `__basg_qm6Stringt1` and `__basg_qm6Stringt14Byte` (double-underscore Ghidra variants) to `FLIRT_DESCRIPTIONS` — some FLIRT sig versions emit the double-underscore form; previously they fell through to the generic fallback and got a useless label
+- `label_functions.py`: added `_bp_stackcheck_q4Word` to `FLIRT_DESCRIPTIONS` mapped to the `bp_unit_init` short name — prevents the raw FLIRT identifier from appearing in labeled output when Ghidra identifies the stack check entry point by signature rather than by offset
+
+### Changed
+- `annotate_strings.py`: segment-relative candidate generation extended to both argument orderings in each `(a, b)` / `(b, a)` pair — covers cases where Ghidra decompiles the far-call ABI with swapped argument order
+- `label_functions.py`: `flirt_pattern` regex and `label_line` regex widened from `__[A-Z]\w+` to `__[A-Za-z]\w+` so double-underscore names starting with a lowercase letter (e.g., `__basg_qm6Stringt1`) are scanned and decoded
+- `label_functions.py`: `decode_flirt_name` generic `_q` splitter now only fires for **single-underscore** names (`_Foo_qBar`); double-underscore names not in the explicit tables return `None` instead of being decoded generically — prevents name-count collisions that silently blocked both the `__foo` and `_foo` renames
+
+### Fixed
+- `analyze_exe.py`: `build_xref` now tries both `(a as offset, b as segment)` and `(b as offset, a as segment)` orderings — previously only the first ordering was checked, missing xrefs where Ghidra emitted arguments in reverse order; also adds a segment-relative fallback: `(seg - 0x1000) * 16 + offset` for cross-unit string references
+- `analyze_exe.py`: added `_delete_qm6string7integert2` (lowercased) to `KNOWN_STRING_FUNCS` — the segment-relative string assignment function used heavily in stats-screen rendering
+- `tests/test_label_functions.py`: hardcoded `'tests/output/...'` paths replaced with `os.path.join(OUTPUT_DIR, ...)` and `pytest.skip` guards — tests now pass from any working directory, matching the pattern used throughout the rest of the suite
+
+
 
 ### Changed
 - `annotate_strings.py`: removed game-specific processing from `_render()` (backtick colour code collapsing, `0x01` → space mapping); control bytes are now rendered as `\xNN` escape sequences; deleted unused `_is_lord_printable()` helper; removed backtick from letter-ratio counter
