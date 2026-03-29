@@ -233,6 +233,11 @@ FLIRT_DESCRIPTIONS = {
     '_GetEnv_q6String':              ('dos_getenv',         'GetEnv(String) — get environment variable'),
     '_basg_qm6Stringt1':             ('bp_str_assign',      'String assignment'),
     '_basg_qm6Stringt14Byte':        ('bp_str_assign_n',    'String assignment with max length'),
+    # Double-underscore variants emitted by some Ghidra/FLIRT sig versions
+    '__basg_qm6Stringt1':            ('bp_str_assign',      'String assignment'),
+    '__basg_qm6Stringt14Byte':       ('bp_str_assign_n',    'String assignment with max length'),
+    # BP7 stack overflow check — called at function entry with stack frame size
+    '_bp_stackcheck_q4Word':         ('bp_stack_check',     'Stack overflow check / function stack frame init'),
     '_IOResult_qv':                  ('bp_ioresult',        'IOResult — last I/O result code'),
     '_UpCase_q4Char':                ('bp_upcase',          'UpCase(Char) — convert to uppercase'),
     '_RunError_q4Byte':              ('bp_runerror',        'RunError(Byte) — trigger runtime error'),
@@ -649,7 +654,7 @@ def label_line(line: str, labels: dict[str, tuple[str, str]],
 
     # Find FLIRT-named function calls
     if flirt_labels:
-        flirt_matches = list(re.finditer(r'(\b(?:_[A-Za-z]\w*_q[A-Za-z0-9]+|__[A-Z][A-Za-z]+)\b)\s*\(', line))
+        flirt_matches = list(re.finditer(r'(\b(?:_[A-Za-z]\w*_q[A-Za-z0-9]+|__[A-Za-z]\w+)\b)\s*\(', line))
         for m in flirt_matches:
             func_name = m.group(1)
             if func_name in flirt_labels:
@@ -720,8 +725,9 @@ def main():
 
     # Find and decode FLIRT-identified functions
     # Broader pattern: catches @Name$q... (rendered as _Name_q...) and __Name
+    # Note: __[A-Za-z]\w+ now covers lowercase-starting names like __basg_qm6Stringt1
     flirt_pattern = re.compile(
-        r'\b(_[A-Za-z]\w*_q[A-Za-z0-9]+|__[A-Z][A-Za-z]+)\b'
+        r'\b(_[A-Za-z]\w*_q[A-Za-z0-9]+|__[A-Za-z]\w+)\b'
     )
     flirt_funcs = flirt_pattern.findall(text)
     flirt_counts = defaultdict(int)
