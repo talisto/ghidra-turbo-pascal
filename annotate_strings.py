@@ -198,18 +198,27 @@ def _parse_int(s: str) -> int | None:
 #
 # In Borland Pascal decompiled output, display functions like
 #   FUN_265c_0002(0x2f, 0x32e9)
-# pass TWO constants: the first is the string's *image offset* within the EXE
-# code+data area; the second is the Borland Pascal unit's data-segment selector
-# (which Ghidra rebased by +0x1000).  The segment value is NOT part of the
-# address calculation — it's an artefact of the far-call ABI.
+# pass TWO constants.  Depending on where the string lives, the first arg may be:
 #
-# Therefore the DB lookup key is simply:  first_arg + 0x10000
-# (or second_arg + 0x10000 — we try both in case Ghidra swaps argument order).
+#   1. An *absolute* image offset (common for same-unit strings, where the
+#      compiler embeds the string early in the EXE image near its origin).
+#      DB lookup key = first_arg + 0x10000.
 #
+#   2. A *segment-relative* offset — an offset within the data area of the
+#      BP unit identified by the second arg (the Ghidra-rebased segment selector).
+#      This happens for cross-unit string references, e.g.:
+#        FUN_265c_02a8(0x3571, 0x32e9)  →  string in seg 0x32e9 at offset 0x3571
+#      DB lookup key = (seg - 0x1000) * 16 + offset + 0x10000
+#      where (seg - 0x1000) * 16 is the image base of the segment (Ghidra maps
+#      each segment at  original_selector * 16  relative to the image start, and
+#      Ghidra rebases all selectors by +0x1000).
+#
+# We try BOTH interpretations per pair and use whichever hits the string DB.
 # For overlays loaded at segment 0x8000, the key is:  arg + 0x80000.
 
 _EXE_IMAGE_BASE = 0x10000
 _OVR_IMAGE_BASE = 0x80000
+_GHIDRA_SEG_REBASE = 0x1000   # Ghidra adds this to all DOS segment selectors
 
 def _is_segment_like(v: int) -> bool:
     """Plausible 16-bit Borland Pascal segment selector: 0x1000 – 0x7FFF for EXE,
@@ -248,23 +257,49 @@ def annotate_line(line: str, db: dict[int, str]) -> str:
         a_is_seg = _is_segment_like(a) and 0 <= b <= 0xFFFF
 
         if b_is_seg and a_is_seg:
-            # Both look like segments — try the larger one as segment first
+            # Both look like segments — try the larger one as segment first.
+            # Also add segment-relative candidates: (seg - REBASE) * 16 + off
+            # covers cross-unit string references where 'off' is relative to
+            # the segment's own data area (not an absolute image offset).
             if b >= a:
                 base = _OVR_IMAGE_BASE if b >= 0x8000 else _EXE_IMAGE_BASE
                 candidates.append((a, base))
+                # Segment-relative: treat b as the seg, a as the local offset
+                if b < 0x8000:
+                    seg_img_base = (b - _GHIDRA_SEG_REBASE) * 16
+                    candidates.append((seg_img_base + a, _EXE_IMAGE_BASE))
                 base = _OVR_IMAGE_BASE if a >= 0x8000 else _EXE_IMAGE_BASE
                 candidates.append((b, base))
+                # Segment-relative: treat a as the seg, b as the local offset
+                if a < 0x8000:
+                    seg_img_base = (a - _GHIDRA_SEG_REBASE) * 16
+                    candidates.append((seg_img_base + b, _EXE_IMAGE_BASE))
             else:
                 base = _OVR_IMAGE_BASE if a >= 0x8000 else _EXE_IMAGE_BASE
                 candidates.append((b, base))
+                if a < 0x8000:
+                    seg_img_base = (a - _GHIDRA_SEG_REBASE) * 16
+                    candidates.append((seg_img_base + b, _EXE_IMAGE_BASE))
                 base = _OVR_IMAGE_BASE if b >= 0x8000 else _EXE_IMAGE_BASE
                 candidates.append((a, base))
+                if b < 0x8000:
+                    seg_img_base = (b - _GHIDRA_SEG_REBASE) * 16
+                    candidates.append((seg_img_base + a, _EXE_IMAGE_BASE))
         elif b_is_seg:
             base = _OVR_IMAGE_BASE if b >= 0x8000 else _EXE_IMAGE_BASE
             candidates.append((a, base))
+            # Segment-relative path for _Delete_qm6String7Integert2(off, seg)
+            # and similar cross-unit string calls where 'a' is a local offset
+            # within segment 'b' rather than an absolute image offset.
+            if b < 0x8000:
+                seg_img_base = (b - _GHIDRA_SEG_REBASE) * 16
+                candidates.append((seg_img_base + a, _EXE_IMAGE_BASE))
         elif a_is_seg:
             base = _OVR_IMAGE_BASE if a >= 0x8000 else _EXE_IMAGE_BASE
             candidates.append((b, base))
+            if a < 0x8000:
+                seg_img_base = (a - _GHIDRA_SEG_REBASE) * 16
+                candidates.append((seg_img_base + b, _EXE_IMAGE_BASE))
 
         for img_off, base in candidates:
             addr = img_off + base
