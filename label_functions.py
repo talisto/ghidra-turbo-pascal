@@ -624,7 +624,15 @@ def decode_flirt_name(mangled: str) -> tuple[str, str] | None:
     # Try to decode from the mangling pattern:
     # @FuncName$qParamTypes  →  _FuncName_qParamTypes (Ghidra's C rendering)
     # Common type codes: m=var, 4=ref, q=params, v=void
-    if mangled.startswith('_') and '_q' in mangled:
+    #
+    # NOTE: Only apply the generic _q fallback to SINGLE-underscore names.
+    # Double-underscore names (__foo_qBar) that aren't in the explicit tables are
+    # NOT decoded here — their fallback decode often produces the same short name
+    # as the corresponding single-underscore variant, causing a name-count collision
+    # that blocks BOTH renames.  Any double-underscore name we want decoded must have
+    # an explicit entry in FLIRT_DESCRIPTIONS or FLIRT_PLAIN_DESCRIPTIONS above.
+    if (mangled.startswith('_') and not mangled.startswith('__')
+            and '_q' in mangled):
         # Extract function name between leading _ and _q
         parts = mangled.split('_q', 1)
         func_name = parts[0].lstrip('_')
