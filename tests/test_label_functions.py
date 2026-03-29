@@ -4,8 +4,10 @@ Tests the function labeling pipeline: offset detection, pattern matching,
 FLIRT decoding, and overall label coverage.
 """
 import re
+import os
 import pytest
 import label_functions as lf
+from conftest import OUTPUT_DIR
 
 
 class TestBuildLabelTable:
@@ -52,7 +54,9 @@ class TestBuildLabelTable:
 
     def test_ddplus_labels_detected(self):
         """DDPlus door driver functions should be labeled in DDTEST."""
-        path = 'tests/output/DDTEST/decompiled.c'
+        path = os.path.join(OUTPUT_DIR, 'DDTEST', 'decompiled.c')
+        if not os.path.isfile(path):
+            pytest.skip("DDTEST output not available")
         with open(path, encoding='utf-8', errors='replace') as f:
             text = f.read()
         labels = lf.build_label_table(text)
@@ -303,7 +307,9 @@ class TestLabelCoverage:
     @pytest.mark.parametrize('program,expected_fns', list(EXPECTED_FLIRT.items()))
     def test_expected_flirt_functions_present(self, program, expected_fns):
         """Programs using specific features should have corresponding FLIRT IDs."""
-        path = f'tests/output/{program}/decompiled.c'
+        path = os.path.join(OUTPUT_DIR, program, 'decompiled.c')
+        if not os.path.isfile(path):
+            pytest.skip(f"{program} output not available")
         with open(path, encoding='utf-8', errors='replace') as f:
             text = f.read()
         for fn in expected_fns:
