@@ -107,6 +107,7 @@ public class Decompile extends GhidraScript {
         {"0371", "bp_textrec_init",     "TextRec initialization helper"},
         {"03be", "bp_write_setup",      "Write buffer setup"},
         {"03fa", "bp_writeln_impl",     "WriteLn implementation"},
+        {"04ed", "bp_str_temp_read",    "Atomic read & clear temporary string pointer"},
         {"0627", "bp_read_setup",       "Read buffer setup"},
         {"0701", "bp_write_str",        "Write(Text, String, Word) — write string"},
         {"07bd", "bp_longint_mul",      "Longint multiply (32-bit on 16-bit)"},

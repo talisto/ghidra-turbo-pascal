@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Decompile.java`: consolidated single-pass GhidraScript replacing the previous 3-step pipeline (`DecompileAll.java` + `annotate_strings.py` + `label_functions.py`); performs Pascal string discovery, string database construction, function labeling (offset tables + FLIRT renaming + pattern detection), decompilation with inline string annotations, and `strings.json` output — all in one `analyzeHeadless` invocation
 - `Decompile.java`: full port of all label tables — `BP_SYSTEM_LABELS`, `BP_SYSTEM_CORE_LABELS`, `RHP_DISPLAY_LABELS`, `RHP_INPUT_LABELS`, `CONV_LABELS`, `TIMER_LABELS`, `RECORD_LABELS`, `DDPLUS_LABELS`, `DDPLUS_IO_LABELS`, `CRT_UNIT_LABELS`, plus `FLIRT_DESCRIPTIONS` and `FLIRT_PLAIN_DESCRIPTIONS` (~100+ entries)
 - `Decompile.java`: pattern-based function identification using Ghidra's `HighFunction` and PcodeOps API — structural analysis of decompiled IR
+- `Decompile.java`: `bp_str_temp_read` offset label for atomic read & clear temporary string pointer (offset `04ed`)
+- `scripts/CreateBPSignatures.java`: GhidraScript that hashes FLIRT-identified functions to build a JSON signature database using Ghidra's FID service (FNV1a 64-bit hashes); retained for future use
+- `scripts/build_signatures.sh`: one-time orchestration script to build `sigs/bp7_signatures.json` from test binaries; retained for future use
+- `sigs/bp7_signatures.json`: hash-based function signature database (90 entries, 89 unique names) — experimental alternative to FLIRT `.sig` files; retained for future use
 
 ### Changed
 - `decompile.sh`: pipeline reduced from 4 passes (import → FLIRT → decompile → annotate → label) to 2 passes (import → FLIRT → Decompile.java); backward-compatible `.annotated.c` and `.labeled.c` copies still produced
