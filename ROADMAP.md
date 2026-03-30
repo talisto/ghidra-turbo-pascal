@@ -1,6 +1,6 @@
-# Roadmap: From Decompiled C to Reproducible Executable
+# Roadmap: From Decompiled C to Compilable Pascal Source
 
-> A prioritized plan for improving the ghidra-turbo-pascal decompilation pipeline, with the ultimate goal of producing source code that can be recompiled into a byte-identical executable.
+> A prioritized plan for producing working Turbo Pascal 7 source files from Ghidra-decompiled DOS MZ executables. The goal is not byte-identical reproduction — it's **functional Pascal programs** that compile with TP7/FPC and produce the same observable behavior as the original.
 
 ## Current State (v2.0.0)
 
@@ -10,242 +10,329 @@
 | FLIRT + hash-based RTL function labeling (~90 signatures) | ✅ Complete |
 | Single-pass headless decompilation pipeline | ✅ Complete |
 | Overlay (.OVR) loading | ✅ Complete |
-| 16 test binaries with full pytest coverage (234 tests) | ✅ Complete |
+| 16 test binaries with full pytest coverage | ✅ Complete |
+| C-to-Pascal transpiler (`pascal_emit.py`) | ✅ Prototype |
+| Library code elimination in decompiled output | ✅ Complete |
+| Artifact cleanup (CONCAT11, unaff_DS, calling conventions) | ✅ Complete |
+| BP7 type definitions registered in Ghidra (TextRec, FileRec, etc.) | ✅ Registered (not yet applied) |
 
-### What's Still Missing
+### Current Pascal Output Quality
 
-The decompiled output still has:
-- Raw memory addresses (`*(undefined2 *)0x71 = 100`) instead of named variables
-- Unnamed application functions (`FUN_1000_000b`)
-- No data types — everything is `undefined1`/`undefined2`/`int`
-- No record/struct recovery
-- No function signatures (parameter types, return types)
-- Ghidra register artifacts (`unaff_DS`, `extraout_AH`, `CONCAT11`)
+The transpiler (`pascal_emit.py`) can emit `.pas` files, but they are **not compilable or functional**. Assessed against 16 test programs with known original source:
+
+| Area | Status | Example Problem |
+|------|--------|-----------------|
+| Trivial programs (WriteLn only) | ✅ Works | HELLO.pas compiles and runs |
+| Global variables | 🟡 Partial | Named as `g_0052` — correct type, wrong name |
+| WriteLn/Write sequences | 🟡 Partial | Most detected; some emit `{int}` or `{???}` placeholders |
+| Arithmetic operators | ❌ Broken | `div` → `/`, `mod` → `%` (C syntax, not Pascal) |
+| Bitwise/logical operators | ❌ Broken | `and`/`or`/`xor`/`not`/`shl`/`shr` not converted |
+| For loops | ❌ Not implemented | Emitted as `{ for loop: ... }` comments |
+| Case statements | ❌ Not implemented | Emitted as if/else chains with inverted logic |
+| String operations | ❌ Non-functional | String type lost; Concat/Copy/Pos/Length/Delete/Insert are raw calls |
+| Record types | ❌ Not recovered | Field access as `*(int *)(ptr + 0x15)` |
+| Nested procedures | ❌ Not recovered | Flattened to separate procedures with frame pointer params |
+| File I/O | ❌ Non-functional | Assign/Reset/Rewrite/ReadLn are unresolved FUN_xxxx calls |
+| Function return values | ❌ Broken | C `return` not always converted to `FuncName := value` |
+| Type casts | ❌ Pass-through | C casts like `(ulong)`, `(uint)` appear verbatim |
+| 32-bit arithmetic | ❌ Broken | LongInt operations decomposed to 16-bit carry pairs |
+| Undeclared variables | ❌ Broken | `iVar1`, `uVar5`, `pbVar1` used but not declared |
+| Array types | ❌ Not recovered | Array access as pointer arithmetic |
 
 ---
 
-## Phase 1 — Data Type & Struct Recovery
+## Phase 1 — Fix pascal_emit.py Fundamentals
 
-**Priority**: High | **Impact**: Transformational | **Difficulty**: Medium
+**Priority**: Critical | **Impact**: Makes simple programs compile | **Difficulty**: Low–Medium
 
-### 1.1 Define Borland Pascal RTL Types in Ghidra
+These are pure Python fixes in `pascal_emit.py` that don't require any Ghidra changes. They address syntax errors and missing Pascal constructs.
 
-Create Ghidra `StructureDataType` definitions for standard BP7 types and register them via `Decompile.java` before decompilation begins.
+### 1.1 Fix Arithmetic and Bitwise Operators
 
-**Key types to define:**
+The expression converter (`convert_expression()`) currently emits C operators. Fix:
 
-| Type | Size | Key Fields |
-|------|------|------------|
-| `TextRec` | 263 bytes | `Handle`, `Mode`, `BufSize`, `Private`, `BufPos`, `BufEnd`, `BufPtr`, `OpenFunc`, `InOutFunc`, `FlushFunc`, `CloseFunc`, `UserData`, `Name`, `Buffer` |
-| `FileRec` | 128 bytes | `Handle`, `Mode`, `RecSize`, `Private`, `UserData`, `Name` |
-| `SearchRec` | 43 bytes | `Fill`, `Attr`, `Time`, `Size`, `Name` |
-| `DateTime` | 12 bytes | `Year`, `Month`, `Day`, `Hour`, `Min`, `Sec` |
-| `Registers` | 16 bytes | `AX`/`AL`/`AH`, `BX`/`BL`/`BH`, `CX`/`CL`/`CH`, `DX`/`DL`/`DH`, `BP`, `SI`, `DI`, `DS`, `ES`, `Flags` |
-| `ShortString` | 256 bytes | `Length` (byte) + `Data` (255 bytes) |
+| C Pattern | Current Output | Correct Pascal |
+|-----------|---------------|----------------|
+| `a / b` (integer context) | `a / b` | `a div b` |
+| `a % b` | `a % b` | `a mod b` |
+| `a & b` | `a & b` | `a and b` |
+| `a \| b` | `a \| b` | `a or b` |
+| `a ^ b` | `a ^ b` | `a xor b` |
+| `~a` | `~a` | `not a` |
+| `a << n` | ✅ `a * 2^n` | `a shl n` (use native) |
+| `a >> n` | ✅ `a div 2^n` | `a shr n` (use native) |
+| `(ulong)x` | `(ulong)x` | `LongInt(x)` |
+| `(uint)x` | `(uint)x` | `Word(x)` |
 
-**Implementation**: Add a `registerBP7Types()` method to `Decompile.java` that creates these via `currentProgram.getDataTypeManager().addDataType()`.
+### 1.2 Implement For Loop Conversion
 
-**Impact**: Every `*(undefined2 *)(param_1 + 0x1a)` in TextRec-handling code becomes `file.bufPos`.
+Ghidra emits for loops as C `for(init; cond; step)`. Currently emitted as comments. Convert to Pascal `for i := start to/downto end do`.
 
-### 1.2 Function Signature Annotation
+**Detection patterns:**
+- `for (local_N = START; local_N != END; local_N = local_N + 1)` → `for local_N := START to END do`
+- `for (local_N = START; local_N != END; local_N = local_N - 1)` → `for local_N := START downto END do`
+- Comma operator in condition (assignment in loop header): extract body assignment, emit before loop
 
-Apply correct parameter and return types to labeled RTL functions via the Ghidra API.
+### 1.3 Fix Case Statement Reconstruction
+
+Ghidra decompiles `case i of` as nested `if/else if` chains. The transpiler emits these verbatim, but the comparison direction is often inverted (Ghidra uses `<` where Pascal uses `>`).
+
+**Approach:** Pattern-match chains of `if iVar = CONST then begin ... end else if iVar = CONST2 then begin ...` into `case iVar of CONST: ...; CONST2: ...;`. Also detect range patterns (`(iVar < 3) or (5 < iVar)` → complement of `3..5`).
+
+### 1.4 Fix Variable Declarations
+
+Currently, intermediate variables (`iVar1`, `uVar5`, etc.) are used in the output but never declared. Two approaches:
+- **Collect and declare**: scan the function body for used temp variables and emit `var` blocks
+- **Inline where possible**: replace single-use temps with their source expression
+
+### 1.5 Fix Function Return Value Assignment
+
+C `return expr;` must become `FuncName := expr;` in Pascal. The current code handles this but breaks on:
+- Complex return expressions with casts: `return CONCAT22(a, b);`
+- Functions where the return type detection fails
+- Multiple return paths
+
+### 1.6 Remove C Cast Syntax
+
+Strip or convert remaining C-style casts that pass through:
+- `(int)`, `(uint)`, `(ulong)`, `(byte)`, `(char)` → Pascal type casts or removal
+- `CONCAT11()`, `CONCAT22()` → extract the meaningful value
+- `(uint)(ushort)` chains → simplify to single cast
+
+---
+
+## Phase 2 — Improve Ghidra Output Quality (Decompile.java)
+
+**Priority**: High | **Impact**: Makes complex programs decompilable | **Difficulty**: Medium
+
+Changes to `Decompile.java` that improve the C output fed to `pascal_emit.py`.
+
+### 2.1 Apply Function Signatures to RTL Functions
+
+The ~90 labeled `bp_*` functions currently have no type information in the Ghidra program model. Setting correct signatures via `Function.setReturnType()` and `func.replaceParameters()` will:
+- Eliminate `unaff_DS`, `extraout_AH` artifacts in callers
+- Enable Ghidra's type propagation engine
+- Produce cleaner C output with correct parameter counts
 
 **Priority signatures:**
 
-| Function | Signature |
-|----------|-----------|
-| `bp_random` | `Random(Range: Word): Word` |
-| `bp_str_copy` | `Copy(S: String; Index, Count: Word): String` |
-| `bp_str_pos` | `Pos(Substr, S: String): Byte` |
-| `bp_str_concat` | `Concat(S1, S2: String): String` |
-| `bp_int_to_str` | `Str(Value: Integer; var S: String)` |
-| `bp_file_assign` | `Assign(var F: File; Name: String)` |
-| `bp_file_reset` | `Reset(var F: File)` |
-| `bp_file_close` | `Close(var F: File)` |
-| `bp_halt` | `Halt(ExitCode: Word)` |
+| Function | Signature | Impact |
+|----------|-----------|--------|
+| `bp_write_str` | `(TextRec*, Word, PChar, Word): void` | Cleaner WriteLn reconstruction |
+| `bp_write_int` | `(TextRec*, Integer, Integer): void` | Fix `{int}` placeholders |
+| `bp_random` | `(Word): Word` | Type propagation to callers |
+| `bp_str_copy_bounded` | `(Byte, PChar, Word, PChar, Word): void` | String operation recovery |
+| `bp_file_assign` | `(var FileRec, PChar): void` | File I/O recovery |
 
-**Implementation**: After labeling functions, call `func.setReturnType()` and `func.replaceParameters()` with the correct types.
+### 2.2 Use HighFunction/PcodeOp API Instead of Regex
 
-**Impact**: Eliminates `unaff_DS`, `extraout_AH` artifacts; propagates types through callers.
+Currently, `Decompile.java` extracts all information by regex-parsing the C text output. The `HighFunction` API provides structured access to:
+- **`PcodeOp.CALL`** operations with resolved argument constants — replaces fragile string annotation regex
+- **`HighParam`/`HighVariable`** — parameter and local variable types inferred by the decompiler
+- **`ClangTokenGroup`** — structured C token tree for precise annotation placement
 
-### 1.3 Automated Global Variable Recovery
+This was prototyped in `TestGhidraAPIs.java` but never integrated. Moving to structured IR would eliminate many regex-related bugs in string resolution and write sequence detection.
 
-Borland Pascal stores all globals at fixed DS-relative offsets, packed sequentially in declaration order with no alignment padding.
+### 2.3 Label More Library Functions
 
-**Approach:**
-1. Scan all decompiled functions for memory references to the data segment
-2. Cluster references by offset range
-3. Infer field sizes from Ghidra's assigned types (`undefined1` = Byte, `undefined2` = Word/Integer, etc.)
-4. Emit a "memory map" JSON mapping offset ranges to inferred types
-5. Apply as labeled data at those offsets in the Ghidra program
+Only ~90 RTL functions are currently identified. Many remain as `FUN_xxxx_xxxx`, especially:
+- String manipulation: `FUN_xxxx_07ab` (likely `Pos`), `FUN_xxxx_076a` (likely `Copy`)
+- File I/O: `FUN_1094_08b1` (likely `Assign`), `FUN_1094_0ae3` (likely `Reset`)
+- CRT: `FUN_xxxx_067b` (likely `Write` variant)
 
-**Impact**: Transforms `*(undefined2 *)0x71 = 100` → `player_hp = 100`.
+**Approach:** Expand the hash-based signature database by running `CreateBPSignatures.java` against more test binaries that exercise different RTL functions. Each newly identified function directly improves the transpiled output.
 
-### 1.4 Record (Struct) Detection from Access Patterns
+### 2.4 Global Variable Labeling in Ghidra
 
-When a pointer parameter is dereferenced at multiple offsets (`param + 0`, `param + 2`, `param + 50`), auto-create a struct type.
+Create named labels at known global variable addresses using `createLabel(address, name)` and `createData(address, type)`. This makes the decompiler output use names instead of `*(int *)0x52`.
 
-**BP7-specific advantage**: Records are always byte-packed (`{$A-}` semantics), so struct layout is straightforward — no padding to guess.
+**Initial approach:** For test binaries where we know the original source, extract the variable→offset mapping and apply it. For unknown binaries, use heuristic naming (`g_XXXX` is already done by `pascal_emit.py` — push this into Ghidra so the decompiler itself produces better output).
 
-**Implementation**: Use Ghidra's `StructureDataType` API to create structs from observed offset patterns, then apply them to function parameters.
+### 2.5 Struct Recovery from Pointer Offset Patterns
 
----
+When a parameter is dereferenced at multiple fixed offsets (`*(int *)(param + 0x15)`, `*(int *)(param + 0x17)`, `*(byte *)(param + 0x1e)`), auto-create a `StructureDataType` and apply it.
 
-## Phase 2 — Function Signature & Type Propagation
+**BP7 advantage**: Records are always byte-packed — no alignment padding to guess. The offset pattern directly reveals the struct layout.
 
-**Priority**: High | **Impact**: High | **Difficulty**: Medium
-
-### 2.1 Borland Pascal Calling Convention Modeling
-
-BP7 uses a custom near-call convention:
-- Parameters pushed right-to-left on the stack
-- Caller cleans up stack
-- Results in AX (byte/word) or DX:AX (longint)
-- String parameters passed as `seg:off` far pointers even in near-call models
-- `var` parameters passed as near/far pointers
-
-**Implementation**: Define a custom calling convention via `func.setCallingConvention()`, or create a BP7-specific `.cspec` CompilerSpec if needed. This eliminates most `unaff_DS` and `extraout_AH` artifacts.
-
-### 2.2 Return Type & Parameter Type Propagation
-
-Once library functions have correct signatures, Ghidra's decompiler will propagate types through callers automatically. The key is seeding the right types on the ~90 known RTL functions.
-
-**Chain reaction**: `uVar1 = bp_random(10)` → typed as `Word` → propagates through switch cases → eliminates casts.
-
-### 2.3 Enum Type Creation
-
-For known value sets, define `EnumDataType` instances:
-
-| Enum | Values | Usage |
-|------|--------|-------|
-| `FileMode` | `fmClosed=0xD7B0, fmInput=0xD7B1, fmOutput=0xD7B2, fmInOut=0xD7B3` | TextRec.Mode field |
-| `Boolean` | `False=0, True=1` | Boolean parameters/globals |
-
-**Impact**: `*(char *)0x83 == 3` → `player.class == WARRIOR`.
+**Implementation**: After initial decompilation, scan `HighFunction` for `LOAD`/`STORE` operations with `base + constant_offset` patterns. Group by base parameter. Create struct types. Re-decompile to get field names in output.
 
 ---
 
-## Phase 3 — Control Flow & Code Quality
+## Phase 3 — Pascal Language Feature Recovery
 
-**Priority**: Medium | **Impact**: Medium | **Difficulty**: Low–Medium
+**Priority**: High | **Impact**: Converts from C-like to idiomatic Pascal | **Difficulty**: Medium–High
 
-### 3.1 Var Parameter (Pass-by-Reference) Detection
+### 3.1 String Type and Operations
 
-BP7 `var` parameters are passed as pointers. The decompiler already shows `int *param_3` — post-process to recognize the Pascal idiom and simplify the mental model.
+This is the **single hardest problem**. Borland Pascal strings are length-prefixed (`string[N]` = 1 length byte + N data bytes). Ghidra sees them as byte arrays.
 
-### 3.2 Library Code Elimination ✅
+**What needs to happen:**
+1. **In Decompile.java**: Define a `ShortString` type and apply it where string parameters are detected (functions receiving `byte *` that's passed to `bp_str_*` calls)
+2. **In pascal_emit.py**: Map labeled RTL calls to Pascal built-ins:
+   - `bp_str_copy_bounded()` → string assignment (`:=`)
+   - `bp_str_concat()` → `+` operator or `Concat()`
+   - `_Copy_qm6String7Integert2()` → `Copy(s, idx, len)`
+   - `_Delete_qm6String7Integert2()` → `Delete(s, idx, len)`
+   - `_Pos_qm6Stringt1()` → `Pos(substr, s)`
+   - `_Length_q6String()` → `Length(s)`
+   - `_Val__Longint_qm6Stringm7Integer()` → `Val(s, v, code)`
+   - `_Str__Longint_qm7Integerm6String()` → `Str(v, s)`
 
-The decompiled output contains all functions including RTL internals. Emit a separate "application-only" view excluding labeled library functions.
+3. **String literal recovery**: The current 3-tier strategy (annotation → DAT_ position → puVar try-all) works for WriteLn but fails for string assignments. Need to resolve string constants used in `bp_str_copy_bounded` calls.
 
-**Current state**: ✅ Implemented. Library functions (`bp_*`, FLIRT `@Name$...`, `__Name`) have bodies replaced with `// [LIBRARY]` marker. A summary section lists all identified library functions with addresses. Output reduced 35-51% across test binaries.
+### 3.2 Record Type Reconstruction
 
-**Impact**: User sees 20–50 application functions instead of 200+.
+Even without Ghidra struct recovery (Phase 2.5), `pascal_emit.py` can reconstruct record-style access:
 
-### 3.3 Switch Statement Recovery
+1. **Detect record parameters**: functions where `param_N` is cast to `int` and then accessed at fixed offsets (`*(int *)(iVar + 0x15)`)
+2. **Build offset→field map**: for each function, collect all offsets accessed through the same base pointer
+3. **Emit record type**: generate `type RecN = record field_00: ...; field_02: ...; end;`
+4. **Replace access patterns**: `*(int *)(iVar1 + 0x15)` → `p.field_15` (or `p.hp` if named)
 
-Ghidra sometimes fails to recover `case X of` from computed jumps. Use `DecompInterface.toggleJumpLoads(true)` to get jump table recovery data. Post-process chains of `if/else` into switch statements where the pattern matches.
+### 3.3 Nested Procedure Recovery
 
-### 3.4 Dead Store / Artifact Cleanup (partially complete)
+Ghidra flattens nested procedures. The parent's stack frame is passed as a parameter. Detection:
+- Inner function receives a pointer parameter that accesses parent's local variables at fixed offsets
+- Call site passes `&stack0xfffe` (address of stack frame)
 
-Post-process decompiled output to:
-- ✅ Remove `CONCAT11(extraout_AH, value)` → just `value` (handles nested parens)
-- ✅ Remove unused `unaff_DS` / `extraout_AH` variable declarations
-- ✅ Strip `__stdcall16far` calling convention noise
-- Remove `unaff_DS` / `unaff_SS` parameters from function signatures
-- Simplify `(uint)(ushort)` chains from 16-bit type widening
+**Approach**: Detect `&stackN` arguments at call sites. Mark the called function as a nested procedure. In the emitted Pascal, re-nest it inside the parent and replace frame pointer access with direct variable references.
 
----
+### 3.4 File I/O Operation Recovery
 
-## Phase 4 — Matching Decompilation
+File operations use a specific pattern:
+1. `bp_file_assign(var f, name)` — `Assign(f, name)`
+2. `bp_file_reset(var f)` or `bp_file_rewrite(var f)` — `Reset(f)` / `Rewrite(f)`
+3. `bp_read_*` / `bp_write_*` — `Read(f, ...)` / `Write(f, ...)`
+4. `bp_file_close(var f)` — `Close(f)`
 
-**Priority**: Medium | **Impact**: High (for reproduction goal) | **Difficulty**: High
+Many of these are currently unlabeled `FUN_xxxx_xxxx` calls. Labeling them (Phase 2.3) is prerequisite. Then `pascal_emit.py` maps bp_* names to Pascal built-ins.
 
-### 4.1 Assembly-Level Comparison Framework
+### 3.5 32-bit (LongInt) Arithmetic Recovery
 
-Adapt [asm-differ](https://github.com/simonlindholm/asm-differ) for x86-16:
-- Disassemble original EXE functions with Ghidra
-- Compile reconstructed Pascal source with TP7 or FPC (in TP7 compat mode)
-- Diff at the instruction level, function by function
+Ghidra decomposes 32-bit operations on 16-bit DOS into two-word carry-propagation patterns:
+```c
+// Adding 1000 to a longint:
+uVar1 = *(uint *)LOW_WORD;
+*(int *)LOW_WORD = uVar1 + 1000;
+*(int *)HIGH_WORD = *(int *)HIGH_WORD + (uint)(0xfc17 < uVar1);
+```
 
-This is the gold standard from the matching decomp community (zeldaret/oot, decomp.me). It tells you exactly which functions match and which don't.
-
-### 4.2 Function-by-Function Pascal Reconstruction
-
-Instead of trying to make C output compilable, write actual Pascal source targeting TP7/FPC:
-- Start with leaf functions (no calls to other app functions)
-- Use asm-differ to verify each function matches
-- Work inward through the call graph
-
-### 4.3 Linker Map & Segment Layout Recovery
-
-BP7's linker emits segments in order: System unit → used units (dependency order) → program code. Recover the segment map and produce a linker script that TP7/FPC can use to match the original layout.
-
-For overlay (VROOMM) binaries, model the overlay stub segments and runtime buffer allocation.
-
-### 4.4 Data Section Reproduction
-
-Extract initialized data directly from the EXE:
-- Global variables, const strings, typed constants
-- Produce Pascal `const` and `var` blocks matching original layout byte-for-byte
-- The string table already extracted is the foundation — extend to non-string typed constants
+**Approach**: Pattern-match the carry idiom in `pascal_emit.py`. Detect paired high/low word accesses at adjacent addresses. Emit as single LongInt operations: `longvar := longvar + 1000`.
 
 ---
 
-## Phase 5 — Moonshot: Automated Re-synthesis
+## Phase 4 — Program Structure Recovery
 
-**Priority**: Low | **Impact**: Very High | **Difficulty**: Very High
+**Priority**: Medium | **Impact**: Produces idiomatic Pascal | **Difficulty**: Medium
 
-### 5.1 C-to-Pascal Transpilation
+### 4.1 Type Block Emission
 
-Post-processor converting Ghidra C output to syntactically valid Pascal:
+Recover and emit Pascal `type` declarations:
+- Record types (from Phase 3.2)
+- Array types: detect pointer arithmetic with element-size multiplication (`ptr + i * 2`)
+- Enum types: detect switch/case on a variable with small integer constants
 
-| C Pattern | Pascal Pattern |
-|-----------|----------------|
-| `*(int *)addr` | Typed variable access |
-| `if/else if` chains | `case ... of` |
-| `while(1) { ... break; }` | `repeat ... until condition` |
-| `param_1 + offset` → deref | Record field access |
+### 4.2 Const Block Emission
 
-### 5.2 Dynamic Analysis with DOSBox
+Recover `const` declarations:
+- String constants already in `strings.json` — emit as named consts
+- Numeric constants used in multiple places — heuristic naming
+- Typed constants (initialized variables; Borland Pascal stores these differently from `var`)
 
-Run original EXE in DOSBox with instrumentation:
-- Trace function calls, memory writes, I/O operations
-- Compare dynamic traces against reconstructed source
-- Tools: DOSBox debugger, custom DOSBox instrumentation patches
+### 4.3 Uses Clause Detection
 
-### 5.3 BP7 Ghidra Data Type Archive (.gdt)
+Already partially implemented (detects `Crt`, `Dos` from library function names). Extend:
+- Detect `Overlay` unit usage from overlay-related calls
+- Detect `Printer` unit from printer-specific I/O
+- Detect custom units from segment boundaries (each unit compiles to its own segment)
 
-Package all BP7 types, function signatures, and calling conventions into a reusable `.gdt` archive. Loadable by any Ghidra user working with BP7 binaries — valuable community contribution.
+### 4.4 Entry Point / Main Block Cleanup
 
----
-
-## Reference: Matching Decomp Community Practices
-
-The most successful decompilation-to-recompilation projects (Zelda OoT, Mario 64, Pokémon) follow this workflow:
-
-1. **Disassemble** the original ROM/binary into relocatable assembly
-2. **Build infrastructure** so the assembly can be reassembled into an identical binary
-3. **Replace functions one at a time** with C/Pascal source, verifying each one matches
-4. **Use asm-differ** to compare original vs. recompiled instruction sequences
-5. **Track progress** as "% of functions matching" (decomp.me leaderboard style)
-
-Key insight: they don't try to decompile everything at once. They build a framework where assembly and source coexist, then incrementally replace assembly with source.
-
-For DOS MZ + Borland Pascal, the equivalent would be:
-1. Extract all function bodies as assembly (Ghidra can do this)
-2. Build a TP7/FPC project that links the assembly
-3. Replace functions one by one with Pascal, verifying with asm-differ
-4. Track which functions match
+The entry function contains system initialization code (runtime init, I/O init, module init) mixed with user code. Current noise stripping is extensive but incomplete. Improve:
+- Better boundary detection between init code and user's `begin...end.`
+- Handle `ExitProc` setup patterns
+- Support `{$M stacksize, heapmin, heapmax}` directives from stack check parameters
 
 ---
 
-## Suggested Starting Order
+## Phase 5 — Validation & Iteration
 
-1. **Phase 1.1** — BP7 type definitions (TextRec, FileRec, etc.)
-2. **Phase 1.2** — Function signature annotation for RTL functions
-3. **Phase 1.3** — Global variable recovery
-4. **Phase 2.1** — Calling convention fixes
-5. **Phase 3.2** — Library code elimination
-6. **Phase 4.1** — asm-differ framework
-7. Everything else follows naturally
+**Priority**: Medium | **Impact**: Confidence in output | **Difficulty**: Medium
+
+### 5.1 Compilation Testing with Free Pascal
+
+Set up automated compilation testing:
+- Run `fpc -Mtp` (Turbo Pascal compatibility mode) on each generated `.pas` file
+- Collect and categorize compilation errors
+- Track "% of test programs that compile" as a metric
+
+**Free Pascal is the practical target** — it's freely available, runs on modern systems, and has a TP7 compatibility mode. Actual TP7 requires DOSBox and is harder to automate.
+
+### 5.2 Behavioral Comparison Testing
+
+For programs that compile:
+- Run original EXE in DOSBox (capturing stdout)
+- Run FPC-compiled version natively (capturing stdout)
+- Diff the outputs
+
+This gives a definitive answer: does the decompiled program produce the same behavior?
+
+### 5.3 Test-Driven Development Loop
+
+Each generated `.pas` file has a corresponding original `.PAS` in `tests/data/`. Use the originals as ground truth:
+- Compare control flow structure
+- Compare variable usage
+- Compare string output
+- Track which constructs are correctly recovered vs. still broken
+
+---
+
+## Phase 6 — Advanced Recovery (Stretch Goals)
+
+**Priority**: Low | **Impact**: High for complex programs | **Difficulty**: High
+
+### 6.1 Assembly-Level Matching (asm-differ)
+
+Adapt [asm-differ](https://github.com/simonlindholm/asm-differ) for x86-16 to compare original vs. recompiled functions instruction-by-instruction. This is the gold standard from matching decomp projects (zeldaret/oot, decomp.me).
+
+### 6.2 Calling Convention Refinement
+
+Define a proper BP7 calling convention via Ghidra's `.cspec` mechanism or `setCallingConvention("__pascal")`. This eliminates most register artifacts at the Ghidra level rather than cleaning them up in post-processing.
+
+### 6.3 Data Section Reproduction
+
+Extract initialized data directly from the EXE to produce Pascal `const` and `var` blocks matching original layout. Combined with string table extraction, this recovers all static data.
+
+### 6.4 BP7 Ghidra Data Type Archive (.gdt)
+
+Package all BP7 types, function signatures, and calling conventions into a reusable `.gdt` archive. Valuable community contribution for anyone working with Borland Pascal binaries in Ghidra.
+
+### 6.5 Dynamic Analysis with DOSBox
+
+Run original EXE in DOSBox with instrumentation to trace function calls, memory writes, and I/O operations. Compare traces against reconstructed source for verification.
+
+---
+
+## Implementation Order
+
+The recommended sequence, optimized for earliest working output:
+
+1. **Phase 1.1–1.6** — Fix `pascal_emit.py` fundamentals (operators, for loops, case, variables, casts)
+2. **Phase 2.1** — Apply RTL function signatures in Ghidra
+3. **Phase 2.3** — Label more library functions
+4. **Phase 3.1** — String operation recovery
+5. **Phase 5.1** — Set up FPC compilation testing
+6. **Phase 3.2** — Record type reconstruction
+7. **Phase 3.4** — File I/O recovery
+8. **Phase 3.5** — LongInt arithmetic recovery
+9. **Phase 2.5** — Ghidra-level struct recovery
+10. **Phase 4** — Program structure (types, consts, uses)
+11. **Phase 5.2–5.3** — Behavioral comparison testing
+12. **Phase 6** — Advanced recovery (as needed)
+
+**Milestone targets:**
+- **M1**: HELLO, CONTROL, MATHOPS compile with FPC (Phase 1 complete)
+- **M2**: PROCFUNC, DOSTEST, EXITPROC compile (Phase 2+3 partial)
+- **M3**: STRINGS, RECORDS, FILEIO compile (Phase 3 complete)
+- **M4**: All 16 test programs compile (Phase 4 complete)
+- **M5**: All programs produce identical stdout output (Phase 5 complete)
