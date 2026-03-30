@@ -10,7 +10,9 @@
 //   Phase 2.5: Register BP7 standard types (TextRec, FileRec, etc.)
 //   Phase 3: Identify and label known library functions (offset-based + FLIRT)
 //   Phase 4: Decompile all functions with inline string annotations
-//   Phase 5: Apply function renames, clean up types, write output + strings.json
+//   Phase 5: Apply function renames, clean up types, eliminate library bodies,
+//            clean CONCAT11 artifacts, remove unused declarations, write output
+//   Phase 6: Write strings.json
 //
 // Usage:
 //   analyzeHeadless <proj-dir> <proj-name> -process <EXE> \
@@ -509,17 +511,27 @@ public class Decompile extends GhidraScript {
 
         // Build output with annotations, labels, and renames
         StringBuilder sb = new StringBuilder();
+        List<String[]> libraryFunctions = new ArrayList<>();  // [name, addr]
+
         for (String[] funcData : functionOutputs) {
             String funcName = funcData[0];
             String funcAddr = funcData[1];
             String cCode = funcData[2];
 
+            // Determine the final display name (after renames)
+            String displayName = renames.getOrDefault(funcName, funcName);
+
             sb.append("\n// ==========================================\n");
             sb.append("// Function: ").append(funcName)
               .append(" @ ").append(funcAddr).append("\n");
-            sb.append("// ==========================================\n\n");
+            sb.append("// ==========================================\n");
 
-            if (cCode != null) {
+            if (isLibraryFunction(displayName)) {
+                // Library function: emit marker only, no body
+                sb.append("// [LIBRARY]\n\n");
+                libraryFunctions.add(new String[]{displayName, funcAddr});
+            } else if (cCode != null) {
+                sb.append("\n");
                 // Annotate each line with string references and function labels
                 String[] lines = cCode.split("\n", -1);
                 for (String line : lines) {
@@ -543,6 +555,28 @@ public class Decompile extends GhidraScript {
         output = output.replaceAll("\\bundefined8\\b", "qword");
         output = output.replace("__cdecl16near ", "");
         output = output.replace("__cdecl16far ", "");
+        output = output.replace("__stdcall16far ", "");
+
+        // Clean up CONCAT11(extraout_AH..., value) → value
+        // In BP7, the AH portion is irrelevant; only the lower byte matters
+        output = cleanupConcat11(output);
+
+        // Clean up unused variable declarations (unaff_DS, extraout_AH)
+        output = cleanupUnusedDeclarations(output);
+
+        // Append library function summary section
+        if (!libraryFunctions.isEmpty()) {
+            StringBuilder libSummary = new StringBuilder();
+            libSummary.append("\n// === Library Functions ===\n");
+            libSummary.append("// ").append(libraryFunctions.size())
+                      .append(" library functions identified (bodies omitted)\n");
+            libSummary.append("//\n");
+            for (String[] lib : libraryFunctions) {
+                libSummary.append("//   ").append(lib[0]).append(" @ ").append(lib[1]).append("\n");
+            }
+            libSummary.append("// ===========================\n");
+            output = output + libSummary.toString();
+        }
 
         PrintWriter pw = new PrintWriter(new FileWriter(outFile));
         pw.print(output);
@@ -787,6 +821,24 @@ public class Decompile extends GhidraScript {
                 flirtLabels.put(name, new String[]{shortName, description});
                 continue;
             }
+            // @Name$q... patterns (alternate Borland mangled format)
+            if (name.startsWith("@") && name.contains("$")) {
+                // Convert @Name$qParams → _Name_qParams and look up
+                String converted = name.replace('@', '_').replace('$', '_');
+                desc = FLIRT_DESCRIPTIONS.get(converted);
+                if (desc != null) {
+                    flirtLabels.put(name, desc);
+                    continue;
+                }
+                // Generic decode: extract Name from @Name$...
+                int dollarIdx = name.indexOf('$');
+                String funcPart = name.substring(1, dollarIdx);
+                String params = dollarIdx + 1 < name.length() ? name.substring(dollarIdx + 1) : "";
+                String shortName = "bp_" + funcPart.toLowerCase();
+                String description = funcPart + "(" + params + ") — FLIRT-identified";
+                flirtLabels.put(name, new String[]{shortName, description});
+                continue;
+            }
             // Double-underscore system functions
             if (name.startsWith("__") && name.length() > 2) {
                 String baseName = name.substring(2);
@@ -899,6 +951,184 @@ public class Decompile extends GhidraScript {
 
     // ═══════════════════════════════════════════════════════════════════════
     // String Annotation (replaces annotate_strings.py)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Library Function Detection
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private static final Pattern FLIRT_AT_PATTERN = Pattern.compile("^@\\w+\\$");
+    private static final Pattern FLIRT_DUNDER_PATTERN = Pattern.compile("^__[A-Z]");
+
+    /**
+     * Check if a function name identifies a library function.
+     * Library functions have their bodies eliminated from the output.
+     */
+    private static final String[] LIBRARY_PREFIXES = {
+        "bp_", "ddp_", "crt_", "dos_", "comio_", "ovr_"
+    };
+
+    private boolean isLibraryFunction(String name) {
+        for (String prefix : LIBRARY_PREFIXES) {
+            if (name.startsWith(prefix)) return true;
+        }
+        if (FLIRT_AT_PATTERN.matcher(name).find()) return true;
+        if (FLIRT_DUNDER_PATTERN.matcher(name).find()) return true;
+        return false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CONCAT11 Cleanup
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private static final Pattern CONCAT11_EXTRAOUT = Pattern.compile(
+        "CONCAT11\\(extraout_AH\\w*,");
+
+    /**
+     * Replace CONCAT11(extraout_AH..., value) → value.
+     * In BP7, the AH portion of CONCAT11 is irrelevant — only the lower
+     * byte (AL) matters for character/byte operations.
+     * Complex CONCAT11 patterns (arithmetic) are left untouched.
+     */
+    private String cleanupConcat11(String text) {
+        StringBuilder result = new StringBuilder();
+        int i = 0;
+        java.util.regex.Matcher m = CONCAT11_EXTRAOUT.matcher(text);
+
+        while (m.find(i)) {
+            result.append(text, i, m.start());
+
+            // Find matching closing paren with balanced tracking
+            int parenStart = m.start() + "CONCAT11".length();
+            int depth = 0;
+            int j = parenStart;
+            while (j < text.length()) {
+                char c = text.charAt(j);
+                if (c == '(') depth++;
+                else if (c == ')') {
+                    depth--;
+                    if (depth == 0) break;
+                }
+                j++;
+            }
+
+            if (depth != 0) {
+                // Unbalanced — leave unchanged
+                result.append(text, m.start(), m.end());
+                i = m.end();
+                continue;
+            }
+
+            // Extract inner content: everything between CONCAT11( and )
+            String inner = text.substring(parenStart + 1, j);
+
+            // Find first top-level comma to separate first arg from value
+            int commaPos = -1;
+            int parens = 0;
+            for (int k = 0; k < inner.length(); k++) {
+                char c = inner.charAt(k);
+                if (c == '(') parens++;
+                else if (c == ')') parens--;
+                else if (c == ',' && parens == 0) {
+                    commaPos = k;
+                    break;
+                }
+            }
+
+            if (commaPos >= 0) {
+                String value = inner.substring(commaPos + 1).trim();
+                result.append(value);
+            } else {
+                // No comma found — leave unchanged
+                result.append(text, m.start(), j + 1);
+            }
+
+            i = j + 1;
+        }
+
+        result.append(text, i, text.length());
+        return result.toString();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Unused Variable Declaration Cleanup
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private static final Pattern FUNC_BLOCK_PATTERN = Pattern.compile(
+        "\n// ={10,}\n// Function: \\S+ @ [0-9a-f]+:[0-9a-f]+\n// ={10,}\n");
+    private static final Pattern UNAFF_DS_DECL = Pattern.compile(
+        "^\\s+\\w+\\s+(unaff_DS)\\s*;$", Pattern.MULTILINE);
+    private static final Pattern EXTRAOUT_AH_DECL = Pattern.compile(
+        "^\\s+\\w+\\s+(extraout_AH\\w*)\\s*;$", Pattern.MULTILINE);
+
+    /**
+     * Remove unused variable declarations for unaff_DS and extraout_AH.
+     * After CONCAT11 cleanup, some extraout_AH variables become unused.
+     * Also removes unaff_DS declarations when the variable isn't referenced.
+     */
+    private String cleanupUnusedDeclarations(String output) {
+        // Split into function blocks
+        String[] parts = FUNC_BLOCK_PATTERN.split(output);
+        String[] headers = findAllMatches(FUNC_BLOCK_PATTERN, output);
+
+        StringBuilder result = new StringBuilder();
+        result.append(parts[0]);
+
+        for (int idx = 0; idx < headers.length; idx++) {
+            result.append(headers[idx]);
+            if (idx + 1 < parts.length) {
+                String block = parts[idx + 1];
+                block = removeUnusedDecl(block, UNAFF_DS_DECL);
+                block = removeUnusedDecl(block, EXTRAOUT_AH_DECL);
+                result.append(block);
+            }
+        }
+
+        return result.toString();
+    }
+
+    /** Remove declarations matching pattern if the variable is unused in the block. */
+    private String removeUnusedDecl(String block, Pattern declPattern) {
+        java.util.regex.Matcher m = declPattern.matcher(block);
+        List<int[]> toRemove = new ArrayList<>();
+
+        while (m.find()) {
+            String varName = m.group(1);
+            // Check if varName appears elsewhere in the block
+            String before = block.substring(0, m.start());
+            String after = block.substring(m.end());
+            Pattern varRef = Pattern.compile("\\b" + Pattern.quote(varName) + "\\b");
+            if (!varRef.matcher(before).find() && !varRef.matcher(after).find()) {
+                toRemove.add(new int[]{m.start(), m.end()});
+            }
+        }
+
+        if (toRemove.isEmpty()) return block;
+
+        // Remove matched declarations in reverse order
+        StringBuilder sb = new StringBuilder(block);
+        for (int i = toRemove.size() - 1; i >= 0; i--) {
+            int start = toRemove.get(i)[0];
+            int end = toRemove.get(i)[1];
+            // Also remove the trailing newline if present
+            if (end < sb.length() && sb.charAt(end) == '\n') end++;
+            sb.delete(start, end);
+        }
+        return sb.toString();
+    }
+
+    /** Find all matches of a pattern in text, returning the matched strings. */
+    private String[] findAllMatches(Pattern pattern, String text) {
+        List<String> matches = new ArrayList<>();
+        java.util.regex.Matcher m = pattern.matcher(text);
+        while (m.find()) {
+            matches.add(m.group());
+        }
+        return matches.toArray(new String[0]);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // String Annotation
     // ═══════════════════════════════════════════════════════════════════════
 
     private static final Pattern HEX_PATTERN = Pattern.compile("0[xX][0-9a-fA-F]+");

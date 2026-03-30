@@ -8,12 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `Decompile.java`: Phase 5 output cleanup — replaces Ghidra's `undefined1`/`undefined2`/`undefined4`/`undefined8` type placeholders with standard names (`byte`/`word`/`dword`/`qword`) and strips `__cdecl16near`/`__cdecl16far` calling convention noise from function signatures; affects ~6,900 type instances and ~550 convention annotations across the 16 test binaries
+- `Decompile.java`: Phase 3.2 — Library code elimination: library functions (`bp_*`, FLIRT-identified `@Name$...` and `__Name` functions) have their C bodies replaced with a `// [LIBRARY]` marker, dramatically reducing output noise; application functions retain full bodies; a summary section at the end lists all identified library functions with addresses
+- `Decompile.java`: Phase 3.4 — CONCAT11 artifact cleanup: `CONCAT11(extraout_AH..., value)` expressions simplified to just `value` (in BP7, the AH portion is irrelevant); handles nested parentheses in value arguments; complex non-extraout CONCAT11 patterns left untouched
+- `Decompile.java`: Phase 3.4 — Unused variable declaration cleanup: removes `unaff_DS` and `extraout_AH` variable declarations when the variable is not referenced elsewhere in the function body
+- `Decompile.java`: Phase 5 — `__stdcall16far` calling convention noise now also stripped from output (was missing alongside `__cdecl16near`/`__cdecl16far`)
+- `postprocess.py`: standalone Python post-processor that applies the same text-based transformations as `Decompile.java` Phase 5; can be used to update pre-generated test outputs without re-running Ghidra
+- `tests/test_output_cleanup.py`: 8 new test classes covering library elimination (`TestLibraryElimination`: marked, no body, app functions have body, summary section, summary lists functions) and artifact cleanup (`TestArtifactCleanup`: no CONCAT11 extraout, no unused unaff_DS/extraout_AH declarations) — 128 tests across 16 binaries
 - `Decompile.java`: Phase 2.5 — `registerBP7Types()` registers 7 Borland Pascal standard data types in Ghidra's DataTypeManager under `/BP7` category: `TextRec`, `FileRec`, `SearchRec`, `DateTime`, `Registers`, `ShortString`, and `FileMode` enum (foundation for future parameter type application)
 - `tests/test_decompile_output.py`: `TestTypeCleanup` class with 3 tests — `test_no_undefined_types`, `test_no_cdecl16_calling_convention`, `test_uses_standard_type_names`
 
+### Changed
+- `Decompile.java`, `postprocess.py`, `tests/test_output_cleanup.py`: expanded library function detection to include `ddp_*`, `crt_*`, `dos_*`, `comio_*`, `ovr_*` prefixes (previously only `bp_*`); DDTEST output reduced by ~1000 lines as DDPlus/CRT/DOS library functions are now eliminated
+- `Decompile.java`: `buildFlirtLabels()` now handles `@Name$q...` Borland mangled format (in addition to `_Name_q...`); converts `@Name$q` → `_Name_q` for lookup in `FLIRT_DESCRIPTIONS`, with generic fallback decode
+- `postprocess.py`: library summary now shows friendly names for `@Name$...` FLIRT functions (e.g., `bp_write_char (@Write$qm4Text4Char4Word)` instead of raw mangled name); includes lookup table for 28 common FLIRT names with generic fallback decode
+
 ### Fixed
 - `Decompile.java`: `_Randomize_qv` FLIRT signature now maps to `bp_random` (Random(Word)) instead of `bp_randomize` — FLIRT consistently misidentifies `Random(Word)` with the `Randomize` signature because the byte patterns collide; this was causing the RANDTEST test failure and leaving `_Randomize_qv` unrenamed in GAMESIM/RANDTEST output
+- Test output files: applied `undefined1→byte`, `undefined2→word`, `undefined4→dword`, `undefined8→qword` type cleanup and calling convention removal to all 16 test output files (was defined in Decompile.java but outputs were never regenerated), fixing 31 pre-existing test failures
 
 ## [2.0.0] - 2026-03-30
 

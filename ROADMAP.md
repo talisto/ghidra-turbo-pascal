@@ -134,11 +134,11 @@ For known value sets, define `EnumDataType` instances:
 
 BP7 `var` parameters are passed as pointers. The decompiler already shows `int *param_3` — post-process to recognize the Pascal idiom and simplify the mental model.
 
-### 3.2 Library Code Elimination
+### 3.2 Library Code Elimination ✅
 
 The decompiled output contains all functions including RTL internals. Emit a separate "application-only" view excluding labeled library functions.
 
-**Current state**: FLIRT/hash labeling identifies ~90 functions. Extend to mark them as library stubs or skip them in output.
+**Current state**: ✅ Implemented. Library functions (`bp_*`, FLIRT `@Name$...`, `__Name`) have bodies replaced with `// [LIBRARY]` marker. A summary section lists all identified library functions with addresses. Output reduced 35-51% across test binaries.
 
 **Impact**: User sees 20–50 application functions instead of 200+.
 
@@ -146,10 +146,12 @@ The decompiled output contains all functions including RTL internals. Emit a sep
 
 Ghidra sometimes fails to recover `case X of` from computed jumps. Use `DecompInterface.toggleJumpLoads(true)` to get jump table recovery data. Post-process chains of `if/else` into switch statements where the pattern matches.
 
-### 3.4 Dead Store / Artifact Cleanup
+### 3.4 Dead Store / Artifact Cleanup (partially complete)
 
 Post-process decompiled output to:
-- Remove `CONCAT11(extraout_AH, value)` → just `value`
+- ✅ Remove `CONCAT11(extraout_AH, value)` → just `value` (handles nested parens)
+- ✅ Remove unused `unaff_DS` / `extraout_AH` variable declarations
+- ✅ Strip `__stdcall16far` calling convention noise
 - Remove `unaff_DS` / `unaff_SS` parameters from function signatures
 - Simplify `(uint)(ushort)` chains from 16-bit type widening
 
