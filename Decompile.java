@@ -10,9 +10,11 @@
 //   Phase 2.5: Register BP7 standard types (TextRec, FileRec, etc.)
 //   Phase 3: Identify and label known library functions (offset-based + FLIRT)
 //   Phase 4: Decompile all functions with inline string annotations
+//            + extract HighFunction/ClangTokenGroup structured IR
 //   Phase 5: Apply function renames, clean up types, eliminate library bodies,
 //            clean CONCAT11 artifacts, remove unused declarations, write output
 //   Phase 6: Write strings.json
+//   Phase 7: Write functions.json (structured IR: AST, params, locals, calls)
 //
 // Usage:
 //   analyzeHeadless <proj-dir> <proj-name> -process <EXE> \
@@ -23,8 +25,10 @@
 //   output-file  Path to write decompiled output (default: decompiled.c in cwd)
 //
 // Output:
-//   - decompiled.c:  Fully annotated and labeled C pseudocode
-//   - strings.json:  Quality-filtered Pascal strings with Ghidra addresses
+//   - decompiled.c:   Fully annotated and labeled C pseudocode
+//   - strings.json:   Quality-filtered Pascal strings with Ghidra addresses
+//   - functions.json: Structured IR per function (AST, parameters, locals,
+//                     call graph with resolved string arguments)
 //
 // IMPORTANT: Run ApplySigHeadless.py BEFORE this script for FLIRT renaming.
 //            FLIRT sig parsing requires Python and cannot be consolidated here.
@@ -464,6 +468,9 @@ public class Decompile extends GhidraScript {
         // Store per-function: decompiled text
         List<String[]> functionOutputs = new ArrayList<>();  // [funcName, address, decompiledC]
 
+        // Structured function data for functions.json (parallel to functionOutputs)
+        List<String> functionIRJsons = new ArrayList<>();
+
         while (it.hasNext()) {
             Function func = it.next();
             DecompileResults res = decomp.decompileFunction(func, 60, monitor);
@@ -473,8 +480,14 @@ public class Decompile extends GhidraScript {
             if (res.decompileCompleted()) {
                 String cCode = res.getDecompiledFunction().getC();
                 functionOutputs.add(new String[]{funcName, funcAddr, cCode});
+
+                // Extract structured IR from HighFunction + ClangTokenGroup
+                HighFunction hf = res.getHighFunction();
+                ClangTokenGroup markup = res.getCCodeMarkup();
+                functionIRJsons.add(buildFunctionIRJson(func, hf, markup, cCode));
             } else {
                 functionOutputs.add(new String[]{funcName, funcAddr, null});
+                functionIRJsons.add(null);
             }
             count++;
         }
@@ -622,6 +635,65 @@ public class Decompile extends GhidraScript {
         spw.println("\n]");
         spw.close();
         println("Phase 6: Wrote " + keptCount + " strings -> " + stringsFile.getAbsolutePath());
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Phase 7: Write functions.json (structured intermediate representation)
+        // ═══════════════════════════════════════════════════════════════════
+        File functionsFile = new File(outFile.getParentFile(), "functions.json");
+        PrintWriter fpw = new PrintWriter(new FileWriter(functionsFile));
+        fpw.println("{");
+        fpw.println("  \"version\": 1,");
+        fpw.println("  \"program\": \"" + escapeJson(currentProgram.getName()) + "\",");
+        fpw.println("  \"functions\": [");
+
+        boolean firstFunc = true;
+        for (int fi = 0; fi < functionOutputs.size(); fi++) {
+            String[] funcData = functionOutputs.get(fi);
+            String funcName = funcData[0];
+            String funcAddr = funcData[1];
+            String cCode = funcData[2];
+            String irJson = fi < functionIRJsons.size() ? functionIRJsons.get(fi) : null;
+
+            if (!firstFunc) fpw.println(",");
+            firstFunc = false;
+
+            // Determine label/description/library status
+            String displayName = renames.getOrDefault(funcName, funcName);
+            boolean isLib = isLibraryFunction(displayName);
+            String label = renames.containsKey(funcName) ? renames.get(funcName) : null;
+            String desc = descriptions.getOrDefault(funcName, null);
+
+            fpw.println("    {");
+            fpw.println("      \"name\": \"" + escapeJson(funcName) + "\",");
+            fpw.println("      \"address\": \"" + escapeJson(funcAddr) + "\",");
+            fpw.println("      \"isLibrary\": " + isLib + ",");
+            if (label != null) {
+                fpw.println("      \"label\": \"" + escapeJson(label) + "\",");
+            }
+            if (desc != null) {
+                fpw.println("      \"description\": \"" + escapeJson(desc) + "\",");
+            }
+
+            if (irJson != null) {
+                fpw.print(irJson);
+            } else {
+                // Decompilation failed — emit null fields
+                fpw.println("      \"returnType\": null,");
+                fpw.println("      \"parameters\": [],");
+                fpw.println("      \"locals\": [],");
+                fpw.println("      \"calls\": [],");
+                fpw.println("      \"cCode\": " + (cCode != null ? "\"" + escapeJson(cCode) + "\"" : "null") + ",");
+                fpw.println("      \"ast\": null");
+            }
+
+            fpw.print("    }");
+        }
+
+        fpw.println("\n  ]");
+        fpw.println("}");
+        fpw.close();
+        println("Phase 7: Wrote " + functionOutputs.size() + " function IR entries -> "
+            + functionsFile.getAbsolutePath());
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1394,7 +1466,7 @@ public class Decompile extends GhidraScript {
                         continue;
                     }
 
-                    String text = new String(strBytes, "US-ASCII");
+                    String text = new String(strBytes, java.nio.charset.StandardCharsets.US_ASCII);
                     long linearAddr = addr.getOffset();
 
                     // Only add if not already in the database (lower minLen for code-segment strings)
@@ -1418,5 +1490,366 @@ public class Decompile extends GhidraScript {
         }
 
         return found;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Structured IR Serialization (functions.json)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Build structured IR JSON fragment for a single function.
+     * Extracts metadata, call data, and AST from Ghidra's HighFunction + ClangTokenGroup.
+     * Returns a JSON fragment (fields within the function object, without enclosing braces).
+     */
+    private String buildFunctionIRJson(Function func, HighFunction hf,
+                                       ClangTokenGroup markup, String cCode) {
+        StringBuilder sb = new StringBuilder();
+
+        // Return type
+        String retType = null;
+        if (hf != null) {
+            try {
+                DataType rt = hf.getFunctionPrototype().getReturnType();
+                retType = (rt != null) ? rt.getName() : null;
+            } catch (Exception e) { /* ignore */ }
+        }
+        if (retType == null && func.getReturnType() != null) {
+            retType = func.getReturnType().getName();
+        }
+        sb.append("      \"returnType\": ");
+        if (retType != null) sb.append("\"").append(escapeJson(retType)).append("\"");
+        else sb.append("null");
+        sb.append(",\n");
+
+        // Parameters
+        sb.append("      \"parameters\": ");
+        sb.append(serializeParams(hf, func));
+        sb.append(",\n");
+
+        // Local variables
+        sb.append("      \"locals\": ");
+        sb.append(serializeLocals(hf));
+        sb.append(",\n");
+
+        // Call data with string resolution
+        sb.append("      \"calls\": ");
+        sb.append(serializeCalls(hf));
+        sb.append(",\n");
+
+        // Original C code
+        sb.append("      \"cCode\": ");
+        if (cCode != null) sb.append("\"").append(escapeJson(cCode)).append("\"");
+        else sb.append("null");
+        sb.append(",\n");
+
+        // AST from ClangTokenGroup
+        sb.append("      \"ast\": ");
+        if (markup != null) {
+            serializeClangNode(markup, sb, 3);
+        } else {
+            sb.append("null");
+        }
+        sb.append("\n");
+
+        return sb.toString();
+    }
+
+    /**
+     * Serialize function parameters from HighFunction (or fall back to Function).
+     */
+    private String serializeParams(HighFunction hf, Function func) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[");
+
+        boolean hasParams = false;
+
+        if (hf != null) {
+            try {
+                LocalSymbolMap lsm = hf.getLocalSymbolMap();
+                int numParams = lsm.getNumParams();
+                for (int i = 0; i < numParams; i++) {
+                    HighParam param = lsm.getParam(i);
+                    if (param == null) continue;
+                    if (hasParams) sb.append(", ");
+                    sb.append("{\"name\": \"").append(escapeJson(param.getName())).append("\"");
+                    sb.append(", \"type\": \"").append(escapeJson(param.getDataType().getName())).append("\"");
+                    sb.append(", \"size\": ").append(param.getSize());
+                    sb.append(", \"index\": ").append(i);
+                    sb.append("}");
+                    hasParams = true;
+                }
+            } catch (Exception e) {
+                // Fall through to Function-based extraction
+                if (!hasParams) return serializeParamsFromFunction(func);
+            }
+        } else {
+            return serializeParamsFromFunction(func);
+        }
+
+        sb.append("]");
+        return sb.toString();
+    }
+
+    /**
+     * Fallback: extract parameter info from Function object (less precise than HighFunction).
+     */
+    private String serializeParamsFromFunction(Function func) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[");
+        Parameter[] params = func.getParameters();
+        for (int i = 0; i < params.length; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append("{\"name\": \"").append(escapeJson(params[i].getName())).append("\"");
+            sb.append(", \"type\": \"").append(escapeJson(params[i].getDataType().getName())).append("\"");
+            sb.append(", \"size\": ").append(params[i].getLength());
+            sb.append(", \"index\": ").append(i);
+            sb.append("}");
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    /**
+     * Serialize local variables from HighFunction's LocalSymbolMap.
+     * Excludes parameters (already serialized separately).
+     */
+    private String serializeLocals(HighFunction hf) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[");
+
+        if (hf != null) {
+            try {
+                LocalSymbolMap lsm = hf.getLocalSymbolMap();
+                int numParams = lsm.getNumParams();
+                boolean first = true;
+
+                // Iterate all symbols — those not in the parameter list are locals
+                Iterator<HighSymbol> symbols = lsm.getSymbols();
+                while (symbols.hasNext()) {
+                    HighSymbol sym = symbols.next();
+                    if (sym == null) continue;
+                    // Skip parameters
+                    boolean isParam = false;
+                    for (int i = 0; i < numParams; i++) {
+                        HighParam hp = lsm.getParam(i);
+                        if (hp != null && hp.getName().equals(sym.getName())) {
+                            isParam = true;
+                            break;
+                        }
+                    }
+                    if (isParam) continue;
+
+                    if (!first) sb.append(", ");
+                    sb.append("{\"name\": \"").append(escapeJson(sym.getName())).append("\"");
+                    sb.append(", \"type\": \"").append(escapeJson(sym.getDataType().getName())).append("\"");
+                    sb.append(", \"size\": ").append(sym.getSize());
+                    sb.append("}");
+                    first = false;
+                }
+            } catch (Exception e) {
+                // LocalSymbolMap iteration failed — return empty
+            }
+        }
+
+        sb.append("]");
+        return sb.toString();
+    }
+
+    /**
+     * Serialize PcodeOp CALL operations from HighFunction.
+     * For each CALL, extracts target address/name and argument constants.
+     * Resolves constant arguments against stringDb for string annotations.
+     */
+    private String serializeCalls(HighFunction hf) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[");
+
+        if (hf != null) {
+            try {
+                Iterator<PcodeOpAST> ops = hf.getPcodeOps();
+                boolean first = true;
+
+                while (ops.hasNext()) {
+                    PcodeOpAST op = ops.next();
+                    if (op.getOpcode() != PcodeOp.CALL) continue;
+
+                    Varnode target = op.getInput(0);
+                    if (target == null) continue;
+
+                    if (!first) sb.append(",\n        ");
+                    first = false;
+                    sb.append("{");
+
+                    // Target address
+                    Address targetAddr = target.getAddress();
+                    sb.append("\"target\": \"").append(escapeJson(targetAddr.toString())).append("\"");
+
+                    // Try to resolve target function name
+                    Function targetFunc = currentProgram.getFunctionManager()
+                        .getFunctionAt(targetAddr);
+                    if (targetFunc != null) {
+                        sb.append(", \"targetName\": \"").append(escapeJson(targetFunc.getName())).append("\"");
+                    }
+
+                    // Serialize arguments
+                    sb.append(", \"args\": [");
+                    boolean firstArg = true;
+                    List<long[]> constPairs = new ArrayList<>();  // for string resolution
+
+                    for (int i = 1; i < op.getNumInputs(); i++) {
+                        Varnode arg = op.getInput(i);
+                        if (arg == null) continue;
+                        if (!firstArg) sb.append(", ");
+                        firstArg = false;
+
+                        if (arg.isConstant()) {
+                            long val = arg.getOffset();
+                            sb.append("{\"kind\": \"const\", \"value\": ").append(val).append("}");
+                            constPairs.add(new long[]{i, val});
+                        } else if (arg.isRegister()) {
+                            sb.append("{\"kind\": \"register\", \"name\": \"")
+                              .append(escapeJson(currentProgram.getRegister(arg).getName()))
+                              .append("\"}");
+                        } else if (arg.isAddress()) {
+                            sb.append("{\"kind\": \"address\", \"value\": \"")
+                              .append(escapeJson(arg.getAddress().toString())).append("\"}");
+                        } else {
+                            sb.append("{\"kind\": \"other\", \"value\": \"")
+                              .append(escapeJson(arg.toString())).append("\"}");
+                        }
+                    }
+                    sb.append("]");
+
+                    // Resolve string arguments
+                    List<String> stringArgs = new ArrayList<>();
+                    for (long[] pair : constPairs) {
+                        int argIdx = (int) pair[0];
+                        long val = pair[1];
+
+                        // Try direct lookup with EXE and OVR image bases
+                        String str = stringDb.get(val + EXE_IMAGE_BASE);
+                        if (str == null) str = stringDb.get(val + OVR_IMAGE_BASE);
+                        if (str == null) str = stringDb.get(val);
+
+                        if (str != null) {
+                            String display = str.length() > 200 ? str.substring(0, 200) : str;
+                            stringArgs.add("{\"argIndex\": " + argIdx
+                                + ", \"offset\": " + val
+                                + ", \"string\": \"" + escapeJson(display) + "\"}");
+                        }
+                    }
+
+                    if (!stringArgs.isEmpty()) {
+                        sb.append(", \"resolvedStrings\": [");
+                        sb.append(String.join(", ", stringArgs));
+                        sb.append("]");
+                    }
+
+                    sb.append("}");
+                }
+            } catch (Exception e) {
+                // PcodeOp iteration failed
+            }
+        }
+
+        sb.append("]");
+        return sb.toString();
+    }
+
+    /**
+     * Recursively serialize a ClangNode tree to JSON.
+     * Group nodes (ClangTokenGroup, ClangFunction, ClangStatement, etc.) emit
+     * {"nodeType": "...", "children": [...]}.
+     * Leaf tokens emit {"nodeType": "token", "kind": "...", "value": "..."}.
+     * ClangBreak nodes are skipped (they're just formatting whitespace).
+     */
+    private void serializeClangNode(ClangNode node, StringBuilder sb, int indent) {
+        String pad = indentStr(indent);
+        String pad1 = indentStr(indent + 1);
+
+        if (node instanceof ClangBreak) {
+            sb.append("null"); // caller skips nulls
+            return;
+        }
+
+        if (node instanceof ClangToken) {
+            ClangToken tok = (ClangToken) node;
+            sb.append("{\"nodeType\": \"token\"");
+            sb.append(", \"kind\": \"").append(getTokenKind(tok)).append("\"");
+
+            String text = tok.getText();
+            if (text != null) {
+                sb.append(", \"value\": \"").append(escapeJson(text)).append("\"");
+            }
+
+            // For variable tokens, include type info from the decompiler
+            if (tok instanceof ClangVariableToken) {
+                try {
+                    HighVariable hv = tok.getHighVariable();
+                    if (hv != null && hv.getDataType() != null) {
+                        sb.append(", \"varType\": \"")
+                          .append(escapeJson(hv.getDataType().getName())).append("\"");
+                    }
+                } catch (Exception e) { /* ignore */ }
+            }
+
+            // Include PC address for tokens (useful for cross-referencing)
+            try {
+                Address pcAddr = tok.getMinAddress();
+                if (pcAddr != null) {
+                    sb.append(", \"pc\": \"").append(pcAddr.toString()).append("\"");
+                }
+            } catch (Exception e) { /* ignore */ }
+
+            sb.append("}");
+        } else {
+            // Group node
+            sb.append("{\n");
+            sb.append(pad1).append("\"nodeType\": \"").append(getGroupType(node)).append("\",\n");
+            sb.append(pad1).append("\"children\": [\n");
+
+            boolean firstChild = true;
+            for (int i = 0; i < node.numChildren(); i++) {
+                ClangNode child = node.Child(i);
+                if (child instanceof ClangBreak) continue; // skip formatting
+
+                if (!firstChild) sb.append(",\n");
+                firstChild = false;
+                sb.append(pad1).append("  ");
+                serializeClangNode(child, sb, indent + 2);
+            }
+
+            sb.append("\n").append(pad1).append("]\n");
+            sb.append(pad).append("}");
+        }
+    }
+
+    /** Classify a ClangToken into a kind string for JSON. */
+    private String getTokenKind(ClangToken tok) {
+        if (tok instanceof ClangVariableToken) return "variable";
+        if (tok instanceof ClangFuncNameToken) return "funcName";
+        if (tok instanceof ClangOpToken) return "op";
+        if (tok instanceof ClangTypeToken) return "type";
+        if (tok instanceof ClangFieldToken) return "field";
+        if (tok instanceof ClangSyntaxToken) return "syntax";
+        if (tok instanceof ClangCommentToken) return "comment";
+        if (tok instanceof ClangLabelToken) return "label";
+        return "text";  // fallback for unknown token types
+    }
+
+    /** Classify a ClangNode group into a type string for JSON. */
+    private String getGroupType(ClangNode node) {
+        if (node instanceof ClangFunction) return "function";
+        if (node instanceof ClangStatement) return "statement";
+        if (node instanceof ClangReturnType) return "returnType";
+        if (node instanceof ClangVariableDecl) return "varDecl";
+        return "group";  // fallback for unknown group types
+    }
+
+    /** Generate an indentation string (2 spaces per level). */
+    private String indentStr(int level) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < level; i++) sb.append("  ");
+        return sb.toString();
     }
 }

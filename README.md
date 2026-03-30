@@ -36,7 +36,7 @@ The script runs the full pipeline:
 1. **Pass 1a** — Import and analyze the EXE in Ghidra
 2. **Pass 1b** — Apply FLIRT signatures to rename anonymous RTL stubs (with `--sigs`)
 3. **Pass 1c** — Load external Borland overlay (if a `.OVR` file is detected or specified with `--ovr`)
-4. **Pass 2** — Decompile all functions with inline string annotations and function labels → `decompiled.c`
+4. **Pass 2** — Decompile all functions with inline string annotations and function labels → `decompiled.c`, `strings.json`, `functions.json`
 
 ### Step 2 — Generate Pascal Source
 

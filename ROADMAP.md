@@ -124,14 +124,34 @@ The ~90 labeled `bp_*` functions currently have no type information in the Ghidr
 | `bp_str_copy_bounded` | `(Byte, PChar, Word, PChar, Word): void` | String operation recovery |
 | `bp_file_assign` | `(var FileRec, PChar): void` | File I/O recovery |
 
-### 2.2 Use HighFunction/PcodeOp API Instead of Regex
+### 2.2 Structured IR: HighFunction/PcodeOp/ClangTokenGroup → functions.json
 
-Currently, `Decompile.java` extracts all information by regex-parsing the C text output. The `HighFunction` API provides structured access to:
-- **`PcodeOp.CALL`** operations with resolved argument constants — replaces fragile string annotation regex
-- **`HighParam`/`HighVariable`** — parameter and local variable types inferred by the decompiler
-- **`ClangTokenGroup`** — structured C token tree for precise annotation placement
+**Status**: ✅ Infrastructure complete — `Decompile.java` Phase 7 emits `functions.json`, `pascal_emit/ir_reader.py` provides navigation API.
 
-This was prototyped in `TestGhidraAPIs.java` but never integrated. Moving to structured IR would eliminate many regex-related bugs in string resolution and write sequence detection.
+The old approach: `Decompile.java` emits flat C text → `pascal_emit` regex-parses it. Fragile, lossy, and error-prone.
+
+The new approach: `Decompile.java` extracts structured data from Ghidra's decompiler internals and emits `functions.json` alongside `decompiled.c`. The `pascal_emit` pipeline consumes the structured IR directly and walks the AST to emit Pascal code, eliminating regex-based parsing.
+
+**`functions.json` schema** (per function):
+- `name`, `address`, `returnType`: function identification and signature
+- `parameters`: name, type, size from `HighFunction.LocalSymbolMap`
+- `locals`: name, type from decompiler-inferred local variables
+- `calls`: `PcodeOp.CALL` targets with argument constants and **resolved string references** (replaces `annotateLine()` regex)
+- `isLibrary`, `label`, `description`: function classification
+- `cCode`: flat C text (debugging fallback)
+- `ast`: serialized `ClangTokenGroup` tree — the structured C statement/token hierarchy
+
+**Remaining work for 2.2:**
+1. ✅ `Decompile.java` Phase 7: emit `functions.json` with AST, params, locals, calls
+2. ✅ `pascal_emit/ir_reader.py`: load + navigate structured IR (AST helpers, call data access)
+3. ✅ `pascal_emit/pipeline.py`: load `functions.json` when available, attach IR to `func_info`
+4. ⬜ Regenerate test outputs (`./tests/run_tests.sh`) to produce `functions.json` files
+5. ⬜ Rewrite `body_converter.py` to walk AST nodes instead of regex-parsing C lines
+6. ⬜ Rewrite `write_sequences.py` to use resolved call data from `calls[]` field
+7. ⬜ Rewrite `expressions.py` to convert AST expression subtrees instead of regex
+8. ⬜ Rewrite `parser.py` to read function metadata from `functions.json` instead of parsing C signatures
+9. ⬜ Update `globals_scanner.py` to use AST variable references
+10. ⬜ Write tests for `ir_reader.py` and JSON-based conversion
 
 ### 2.3 Label More Library Functions
 
@@ -315,20 +335,23 @@ Run original EXE in DOSBox with instrumentation to trace function calls, memory 
 
 ## Implementation Order
 
-The recommended sequence, optimized for earliest working output:
+The recommended sequence, prioritizing structured IR over regex-based conversion:
 
-1. **Phase 1.1–1.6** — Fix `pascal_emit.py` fundamentals (operators, for loops, case, variables, casts)
-2. **Phase 2.1** — Apply RTL function signatures in Ghidra
-3. **Phase 2.3** — Label more library functions
-4. **Phase 3.1** — String operation recovery
-5. **Phase 5.1** — Set up FPC compilation testing
-6. **Phase 3.2** — Record type reconstruction
-7. **Phase 3.4** — File I/O recovery
-8. **Phase 3.5** — LongInt arithmetic recovery
-9. **Phase 2.5** — Ghidra-level struct recovery
-10. **Phase 4** — Program structure (types, consts, uses)
-11. **Phase 5.2–5.3** — Behavioral comparison testing
-12. **Phase 6** — Advanced recovery (as needed)
+1. **Phase 2.2** — ✅ Emit structured IR (`functions.json`) from Ghidra *(infrastructure complete)*
+2. **Phase 2.2 cont.** — Rewrite `pascal_emit` modules to consume AST from `functions.json`
+3. **Phase 2.1** — Apply RTL function signatures in Ghidra (improves IR quality)
+4. **Phase 2.3** — Label more library functions
+5. **Phase 3.1** — String operation recovery (using structured call data)
+6. **Phase 5.1** — Set up FPC compilation testing
+7. **Phase 3.2** — Record type reconstruction (using AST pointer patterns)
+8. **Phase 3.4** — File I/O recovery
+9. **Phase 3.5** — LongInt arithmetic recovery
+10. **Phase 2.5** — Ghidra-level struct recovery
+11. **Phase 4** — Program structure (types, consts, uses)
+12. **Phase 5.2–5.3** — Behavioral comparison testing
+13. **Phase 6** — Advanced recovery (as needed)
+
+> **Note on Phase 1**: The original Phase 1 (fix regex-based operators, for loops, case statements, etc.) is **superseded by Phase 2.2**. Instead of fixing fragile regex patterns, we implement these conversions against the structured AST from `functions.json`. The Phase 1 tasks describe *what* to convert — the approach is now structured IR, not regex.
 
 **Milestone targets:**
 - **M1**: HELLO, CONTROL, MATHOPS compile with FPC (Phase 1 complete)

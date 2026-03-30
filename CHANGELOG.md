@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `Decompile.java`: Phase 7 — structured IR output (`functions.json`) emitted alongside `decompiled.c` and `strings.json`; extracts per-function metadata (return type, parameters, local variables) from `HighFunction`/`LocalSymbolMap`, call graph with resolved constant arguments from `PcodeOp.CALL`, and serialized C AST from `ClangTokenGroup`; string references resolved programmatically via PcodeOp instead of regex
+- `pascal_emit/ir_reader.py`: new module providing `load_functions_json()`, AST navigation helpers (`ast_children`, `ast_tokens`, `ast_text`, `ast_find_groups`, `classify_statement`), and structured call data access (`get_resolved_strings`, `get_call_string_args`)
+
 ### Changed
+- `pascal_emit/pipeline.py`: rewritten to use `functions.json` as primary data source; reads function list, signatures, library classification, and labels from structured IR; builds rename table from function labels and applies to raw `cCode`; post-processes cCode in Python (type cleanup, CONCAT11 removal, calling convention stripping, string annotations); falls back to regex-based decompiled.c parsing only when functions.json is unavailable
+- `pascal_emit/write_sequences.py`: updated Write/WriteLn detection patterns to recognize FLIRT-style function names (`_Write_qm4Textm6String4Word`, `_WriteLn_qm4Text`, `_Write_qm4Text7Longint4Word`) in addition to hash-based labels (`bp_write_str`, `bp_write_char_flush`); added `_is_iocheck()` helper for recognizing both named and unnamed IOCheck calls
+- `pascal_emit/body_converter.py`: updated noise patterns to recognize FLIRT-style names for system functions (`___SystemInit_qv`, `_Halt_q4Word`, `__ClearDSeg`, `__PrintString`); halt handler detection covers both `bp_halt_handler` and `_Halt_q4Word`; function call handler skips known FLIRT-identified system calls
+- `pascal_emit/__init__.py`: parser and globals_scanner imports deferred to lazy `__getattr__` loading (only needed for legacy fallback path)
+- `ROADMAP.md`: Restructured implementation order to skip Phase 1 (regex fixes) and start with Phase 2.2 (structured IR); Phase 1 tasks are now implemented against the AST from `functions.json` instead of regex-parsing C text; updated Phase 2.2 with concrete deliverables and remaining work items
+
+### Fixed
+- `pascal_emit`: 6 previously-failing tests now pass — balanced begin/end for CONTROL, HELLO WriteLn detection, CONTROL char null literal conversion, CONTROL hex-to-decimal conversion, CRTTEST uses clause detection, MATHOPS addition string resolution; all caused by the IR-based pipeline correctly renaming FLIRT function names before body conversion
 - `ROADMAP.md`: Complete rewrite focused on producing compilable Pascal source files as the primary goal; reorganized into 6 phases (pascal_emit.py fixes → Ghidra output quality → language feature recovery → program structure → validation → advanced recovery); added concrete milestone targets (M1–M5) and detailed current output quality assessment against all 16 test programs
 - `pascal_emit.py` → `pascal_emit/` package: refactored 1451-line monolith into 7 focused modules (`strings`, `parser`, `types`, `expressions`, `write_sequences`, `body_converter`, `globals_scanner`, `emitter`, `pipeline`); backward-compatible `__init__.py` re-exports all public API; CLI now invoked via `python3 -m pascal_emit`
 

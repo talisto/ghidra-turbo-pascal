@@ -5,16 +5,25 @@ from .expressions import convert_expression
 
 
 # Patterns for Write/WriteLn-related calls
+# Match both hash-based labels (bp_write_str) and FLIRT-style names (_Write_qm4Text*)
 WRITE_STR_CALL_RE = re.compile(
-    r'(?:bp_write_str|FUN_\w+_0670)\s*\('
+    r'(?:bp_write_str|FUN_\w+_0670|_Write_qm4Text(?:m6String|7String)4Word)\s*\('
 )
 WRITE_STR_ARGS_RE = re.compile(
     r'(?:bp_write_str|FUN_\w+_0670)\s*\(\s*\d+\s*,\s*(0x[0-9a-f]+|\d+)\s*,\s*0x[0-9a-f]+\s*\)'
 )
-WRITE_INT_RE = re.compile(r'bp_write_int\s*\(')
-WRITE_LONGINT_RE = re.compile(r'bp_write_longint\s*\(')
-WRITELN_END_RE = re.compile(r'bp_write_char_flush\s*\(')
-WRITE_END_RE = re.compile(r'bp_flush_text_cond\s*\(')
+WRITE_INT_RE = re.compile(
+    r'(?:bp_write_int|bp_write7Longint4Word|_Write_qm4Text7Longint4Word)\s*\('
+)
+WRITE_LONGINT_RE = re.compile(
+    r'(?:bp_write_longint|bp_write7Longint4Word|_Write_qm4Text7Longint4Word)\s*\('
+)
+WRITELN_END_RE = re.compile(
+    r'(?:bp_write_char_flush|bp_writeln|_WriteLn_qm4Text)\s*\('
+)
+WRITE_END_RE = re.compile(
+    r'(?:bp_flush_text_cond|bp_write(?!\w)|_Write_qm4Text)\s*\('
+)
 STRING_ANNOTATION_RE = re.compile(r'/\*\s*"((?:[^"\\]|\\.)*)"\s*\*/')
 
 WRITE_INT_ARGS_RE = re.compile(
@@ -25,6 +34,14 @@ WRITE_INT_ARGS_SIMPLE_RE = re.compile(
 )
 
 DAT_VALUE_RE = re.compile(r'DAT_\w+ = (\*\(int \*\)0x[0-9a-f]+)')
+
+# IO check function: both hash-labeled and unlabeled forms
+_IOCHECK_RE = re.compile(r'(?:bp_iocheck|FUN_\w+_0291)\s*\(')
+
+
+def _is_iocheck(line):
+    """Check if a line is an I/O check call."""
+    return bool(_IOCHECK_RE.search(line))
 
 
 def extract_string_annotation(line):
@@ -43,7 +60,7 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
       bp_write_str() or FUN_xxxx_0670()    ← write string part
       bp_write_int()                       ← write integer part
       bp_write_char_flush()                ← WriteLn terminator
-      bp_iocheck()                         ← skip
+      bp_iocheck()/FUN_xxxx_0291()          ← skip
 
     Returns list of (start_idx, end_idx, pascal_statement) tuples.
     """
@@ -171,7 +188,7 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
                         nline = lines[j].strip()
                         if not nline:
                             j += 1
-                        elif 'bp_iocheck' in nline:
+                        elif _is_iocheck(nline):
                             j += 1
                             break
                         elif _is_stack_push(nline):
@@ -192,7 +209,7 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
                         nline = lines[j].strip()
                         if not nline:
                             j += 1
-                        elif 'bp_iocheck' in nline:
+                        elif _is_iocheck(nline):
                             j += 1
                             break
                         elif _is_stack_push(nline):
@@ -212,7 +229,7 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
                         nline = lines[j].strip()
                         if not nline:
                             j += 1
-                        elif 'bp_iocheck' in nline:
+                        elif _is_iocheck(nline):
                             j += 1
                             break
                         elif _is_stack_push(nline):
@@ -268,7 +285,7 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
                 continue
 
             # bp_iocheck — skip if within a write sequence
-            if 'bp_iocheck' in jline:
+            if _is_iocheck(jline):
                 if found_write:
                     j += 1
                     sequences.append((start_idx, j, f"WriteLn({', '.join(parts)});"))

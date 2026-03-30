@@ -8,8 +8,8 @@ from .write_sequences import detect_write_sequences
 
 # Lines to strip entirely (noise)
 NOISE_PATTERNS = [
-    re.compile(r'^\s*bp_stack_check\s*\('),
-    re.compile(r'^\s*bp_iocheck\s*\('),
+    re.compile(r'^\s*(?:bp_stack_check|FUN_\w+_02cd)\s*\('),
+    re.compile(r'^\s*(?:bp_iocheck|FUN_\w+_0291)\s*\('),
     re.compile(r'^\s*return\s*;\s*$'),
     re.compile(r'^\s*\w+ unaff_\w+\s*;'),
     re.compile(r'^\s*\w+ extraout_\w+\s*;'),
@@ -18,13 +18,14 @@ NOISE_PATTERNS = [
     re.compile(r'^\s*DAT_\w+\s*='),
     re.compile(r'^\s*/\*\s*WARNING'),
     re.compile(r'^\s*func_0x'),
-    re.compile(r'^\s*bp_halt_handler\s*\('),
-    re.compile(r'^\s*bp_module_init\s*\('),
-    re.compile(r'^\s*bp_clear_dseg\s*\('),
-    re.compile(r'^\s*bp_runtime_init\s*\('),
-    re.compile(r'^\s*bp_input_init\s*\('),
-    re.compile(r'^\s*bp_output_init\s*\('),
-    re.compile(r'^\s*bp_printstring\s*\('),
+    re.compile(r'^\s*(?:bp_halt_handler|_Halt_q4Word)\s*\('),
+    re.compile(r'^\s*(?:bp_module_init|FUN_\w+_00b1)\s*\('),
+    re.compile(r'^\s*(?:bp_clear_dseg|__ClearDSeg)\s*\('),
+    re.compile(r'^\s*(?:bp_runtime_init|FUN_\w+_02e6)\s*\('),
+    re.compile(r'^\s*(?:bp_input_init|FUN_\w+_0364)\s*\('),
+    re.compile(r'^\s*(?:bp_output_init|FUN_\w+_0369)\s*\('),
+    re.compile(r'^\s*(?:bp_printstring|__PrintString)\s*\('),
+    re.compile(r'^\s*___SystemInit_qv\s*\('),
     re.compile(r'^\s*\(\*pcVar\d+\)\s*\('),
     re.compile(r'^\s*pcVar\d+\s*='),
     re.compile(r'^\s*code \*pcVar'),
@@ -116,7 +117,7 @@ def convert_function_body(body, strings_db, func_info, exe_reader=None):
         if not stripped and not c_lines:
             continue
 
-        if 'bp_halt_handler' in stripped:
+        if 'bp_halt_handler' in stripped or '_Halt_q4Word' in stripped:
             break
 
         if is_noise_line(line):
@@ -347,11 +348,19 @@ def convert_c_line(line, func_info):
     call_match = re.match(r'^(\w+)\s*\(.*\)\s*;$', line)
     if call_match:
         fname = call_match.group(1)
-        if fname in ('bp_stack_check', 'bp_iocheck', 'bp_halt_handler',
-                     'bp_write_char_flush', 'bp_flush_text_cond',
-                     'bp_module_init', 'bp_clear_dseg', 'bp_runtime_init',
-                     'bp_input_init', 'bp_output_init', 'bp_printstring'):
+        # Known system/noise calls to skip
+        skip_names = {
+            'bp_stack_check', 'bp_iocheck', 'bp_halt_handler',
+            'bp_write_char_flush', 'bp_flush_text_cond',
+            'bp_module_init', 'bp_clear_dseg', 'bp_runtime_init',
+            'bp_input_init', 'bp_output_init', 'bp_printstring',
+            '___SystemInit_qv',
+        }
+        if fname in skip_names:
             return None
+        # Skip FLIRT-identified system init/IO functions
+        if re.match(r'^_(?:Halt|WriteLn|Write|ReadLn|Read|RunError)_q', fname):
+            return f'{indent}{{ {line} }}'
         if fname.startswith('FUN_'):
             pascal_fname = 'Proc_' + fname[4:]
             args_match = re.search(r'\((.+)\)', line)
