@@ -125,6 +125,54 @@ def try_read_pascal(data: bytes, offset: int, min_len: int = 3, max_len: int = 2
 
 # ── String database builder ────────────────────────────────────────────────
 
+def load_string_db_from_json(json_path: str) -> dict[int, str]:
+    """Load string DB from a strings.json produced by DecompileAll.java.
+    Returns { ghidra_linear_address: rendered_string }.
+
+    Each entry has `offset` (the Ghidra linear address, e.g. 0x10000 for
+    image offset 0) and `string` (already decoded text).  We apply the same
+    quality filters as try_read_pascal() to discard Ghidra false positives
+    (e.g. `"0<:r"` — machine code bytes that pass the raw length check).
+    """
+    import json
+    with open(json_path, encoding='utf-8') as f:
+        entries = json.load(f)
+    db: dict[int, str] = {}
+    for entry in entries:
+        text = entry.get('string', '')
+        offset = entry.get('offset')
+        if not text or offset is None:
+            continue
+        raw = text.encode('latin-1', errors='replace')
+        plen = len(raw)
+        # Apply the same quality guards as try_read_pascal()
+        if plen < 4:
+            continue
+        # First byte must be printable ASCII
+        if not (0x20 <= raw[0] <= 0x7e):
+            continue
+        # Bytes 1-5 must also be printable ASCII
+        for i in range(1, min(6, plen)):
+            if not (0x20 <= raw[i] <= 0x7e):
+                break
+        else:
+            # Tail: last 5 bytes must not contain high bytes
+            tail_start = max(0, plen - 5)
+            for i in range(tail_start, plen):
+                if raw[i] >= 0x80:
+                    break
+            else:
+                # Letter-ratio check
+                letter_bytes = sum(1 for b in raw
+                                   if (0x41 <= b <= 0x5a) or (0x61 <= b <= 0x7a)
+                                   or (0x30 <= b <= 0x39)
+                                   or b in (0x20, 0x21, 0x22, 0x27, 0x28, 0x29,
+                                            0x2c, 0x2e, 0x3a, 0x3f))
+                if letter_bytes >= plen * 0.50:
+                    db[offset] = _render(raw)
+    return db
+
+
 def build_string_db(exe_data: bytes, exe_header: int,
                     ovr_data: bytes | None) -> dict[int, str]:
     """Scan EXE and OVR for Pascal strings.
@@ -362,10 +410,14 @@ def main():
     exe_file = None
     ovr_file = None
     out_file = None
+    strings_json = None
     i = 0
     while i < len(args):
         if args[i] == '-o' and i + 1 < len(args):
             out_file = args[i + 1]
+            i += 2
+        elif args[i] == '--strings-json' and i + 1 < len(args):
+            strings_json = args[i + 1]
             i += 2
         elif src_file is None:
             src_file = args[i]; i += 1
@@ -376,8 +428,10 @@ def main():
         else:
             i += 1
 
-    if not src_file or not exe_file:
+    if not src_file or (not exe_file and not strings_json):
         print("Usage: annotate_strings.py <decompiled.c> <exe-file> [ovr-file] [-o outfile]",
+              file=sys.stderr)
+        print("       annotate_strings.py <decompiled.c> --strings-json <strings.json> [-o outfile]",
               file=sys.stderr)
         sys.exit(1)
 
@@ -385,28 +439,36 @@ def main():
         base, ext = os.path.splitext(src_file)
         out_file = base + '.annotated' + ext
 
-    # Load binaries
-    with open(exe_file, 'rb') as f:
-        exe_data = f.read()
-    e_cparhdr = struct.unpack_from('<H', exe_data, 8)[0]
-    exe_header = e_cparhdr * 16
+    # Build string database — prefer strings.json (from Ghidra) when available
+    if strings_json and os.path.exists(strings_json):
+        print(f"Building string database from {strings_json} ...", flush=True)
+        db = load_string_db_from_json(strings_json)
+        print(f"  {len(db):,} string candidates found")
+    else:
+        # Fallback: scan the raw EXE (and optional OVR) bytes directly
+        if not exe_file:
+            print("ERROR: no exe-file and no --strings-json provided", file=sys.stderr)
+            sys.exit(1)
+        with open(exe_file, 'rb') as f:
+            exe_data = f.read()
+        e_cparhdr = struct.unpack_from('<H', exe_data, 8)[0]
+        exe_header = e_cparhdr * 16
 
-    ovr_data = None
-    if ovr_file and os.path.exists(ovr_file):
-        with open(ovr_file, 'rb') as f:
-            ovr_data = f.read()
-        if ovr_data[:4] != b'FBOV':
-            print(f"Warning: {ovr_file} does not have FBOV magic — skipping OVR",
-                  file=sys.stderr)
-            ovr_data = None
+        ovr_data = None
+        if ovr_file and os.path.exists(ovr_file):
+            with open(ovr_file, 'rb') as f:
+                ovr_data = f.read()
+            if ovr_data[:4] != b'FBOV':
+                print(f"Warning: {ovr_file} does not have FBOV magic — skipping OVR",
+                      file=sys.stderr)
+                ovr_data = None
 
-    # Build string database
-    print(f"Building string database from {exe_file}", end='', flush=True)
-    if ovr_data:
-        print(f" + {ovr_file}", end='', flush=True)
-    print(" ...", flush=True)
-    db = build_string_db(exe_data, exe_header, ovr_data)
-    print(f"  {len(db):,} string candidates found")
+        print(f"Building string database from {exe_file}", end='', flush=True)
+        if ovr_data:
+            print(f" + {ovr_file}", end='', flush=True)
+        print(" ...", flush=True)
+        db = build_string_db(exe_data, exe_header, ovr_data)
+        print(f"  {len(db):,} string candidates found")
 
     # Annotate
     with open(src_file, 'r', encoding='utf-8', errors='replace') as f:

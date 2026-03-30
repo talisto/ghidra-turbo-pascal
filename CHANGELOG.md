@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `annotate_strings.py`: new `load_string_db_from_json()` function — loads the string database from a `strings.json` produced by `DecompileAll.java` (Ghidra's built-in `findPascalStrings`) instead of re-scanning the raw EXE bytes; same quality filters applied to discard low-ratio false positives
+- `annotate_strings.py`: new `--strings-json <file>` CLI argument — when supplied, the EXE file argument becomes optional and the EXE byte scan is skipped entirely
+- `decompile.sh`: Pass 3 now passes `strings.json` (written by Pass 2) to `annotate_strings.py` via `--strings-json` when the file exists; falls back to raw EXE scanning when it does not
+- `tests/test_annotate_strings.py`: two new unit tests — `test_load_string_db_from_json` (verifies JSON loader with quality filtering) and `test_gamesim_strings_json_loads_real_strings` (verifies real GAMESIM strings are present in loaded DB)
+
 ## [1.2.2] - 2026-03-29
 
 ### Added

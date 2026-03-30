@@ -130,3 +130,53 @@ class TestStringExtractionFromEXE:
         assert found_hello, (
             f"HELLO.EXE: 'Hello' not found in extracted strings. "
             f"Found {len(string_texts)} strings.")
+
+    def test_load_string_db_from_json(self):
+        """load_string_db_from_json should parse strings.json and apply quality filters."""
+        import annotate_strings as ann
+        import json, tempfile, os
+
+        entries = [
+            # Valid string — should be kept
+            {"address": "1000:0000", "offset": 0x10000, "string": "Hello, world."},
+            # Too short (< 4 chars) — filtered
+            {"address": "1000:0010", "offset": 0x10010, "string": "Hi"},
+            # All symbols, low letter ratio — filtered (1/6 = 17%)
+            {"address": "1000:0020", "offset": 0x10020, "string": "<>=|!^"},
+            # Missing offset field — skipped
+            {"address": "1000:0030", "string": "No offset"},
+            # Valid string at a different offset — should be kept
+            {"address": "1000:0040", "offset": 0x10040, "string": "Player stats"},
+        ]
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(entries, f)
+            tmp = f.name
+        try:
+            db = ann.load_string_db_from_json(tmp)
+        finally:
+            os.unlink(tmp)
+
+        assert 0x10000 in db, "Valid string at offset 0x10000 should be in DB"
+        assert db[0x10000] == "Hello, world."
+        assert 0x10040 in db, "Valid 'Player stats' string should be in DB"
+        assert 0x10010 not in db, "Too-short string should be filtered out"
+        assert 0x10020 not in db, "Low letter-ratio string '<>=|!^' should be filtered out"
+        assert 0x10030 not in db, "Entry without offset should be skipped"
+
+    def test_gamesim_strings_json_loads_real_strings(self):
+        """GAMESIM strings.json: load_string_db_from_json should include known real strings."""
+        import annotate_strings as ann
+
+        json_path = os.path.join(OUTPUT_DIR, 'GAMESIM', 'strings.json')
+        if not os.path.isfile(json_path):
+            pytest.skip("GAMESIM strings.json not available")
+
+        db = ann.load_string_db_from_json(json_path)
+        values = list(db.values())
+        # Real strings from GAMESIM should be present
+        assert any('Welcome' in v for v in values), \
+            "Expected 'Welcome to...' string in GAMESIM DB"
+        assert any('Status' in v for v in values), \
+            "Expected 'Status:' string in GAMESIM DB"
+        # Low-ratio false positive from raw code bytes should not appear
+        assert '<>=|!^' not in values, "Synthetic false positive should not appear"

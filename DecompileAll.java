@@ -19,7 +19,9 @@
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.*;
 import ghidra.program.model.listing.*;
+import ghidra.program.util.string.FoundString;
 import java.io.*;
+import java.util.List;
 
 public class DecompileAll extends GhidraScript {
     @Override
@@ -56,5 +58,31 @@ public class DecompileAll extends GhidraScript {
         pw.close();
         decomp.dispose();
         println("Decompiled " + count + " functions to " + outFile.getAbsolutePath());
+
+        // Write strings.json — Pascal (length-prefixed) strings found by Ghidra
+        File stringsFile = new File(outFile.getParentFile(), "strings.json");
+        List<FoundString> pascalStrings = findPascalStrings(null, 4, 1, false);
+        PrintWriter spw = new PrintWriter(new FileWriter(stringsFile));
+        spw.println("[");
+        boolean first = true;
+        for (FoundString fs : pascalStrings) {
+            String text = fs.getString(currentProgram.getMemory());
+            if (text == null) continue;
+            String escaped = text
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+            String addr = fs.getAddress().toString();
+            long offset = fs.getAddress().getOffset();
+            if (!first) spw.println(",");
+            spw.print("  {\"address\": \"" + addr + "\", \"offset\": " + offset
+                + ", \"string\": \"" + escaped + "\"}");
+            first = false;
+        }
+        spw.println("\n]");
+        spw.close();
+        println("Found " + pascalStrings.size() + " Pascal strings -> " + stringsFile.getAbsolutePath());
     }
 }

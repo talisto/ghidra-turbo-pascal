@@ -227,13 +227,20 @@ echo ""
 # Uses annotate_strings.py to look up Pascal length-prefixed strings at the
 # constant pairs that appear in Borland Pascal display-function calls, and adds
 # inline /* "text" */ comments to the decompiled output.
+# Prefers strings.json (written by DecompileAll.java via Ghidra's built-in
+# findPascalStrings) when available; falls back to scanning the raw EXE bytes.
 ANNOTATED_FILE="${OUTPUT_FILE%.c}.annotated.c"
+STRINGS_JSON="$OUTPUT_DIR/strings.json"
 ANNOTATE_PY="$SCRIPT_DIR/annotate_strings.py"
 if [[ -f "$ANNOTATE_PY" ]] && command -v python3 &>/dev/null; then
     echo "--- Pass 3: Annotating string references → $ANNOTATED_FILE ..."
-    ANNOTATE_ARGS=("$OUTPUT_FILE" "$EXE_ABS")
-    if [[ -n "${OVR_ABS:-}" ]]; then
-        ANNOTATE_ARGS+=("$OVR_ABS")
+    if [[ -f "$STRINGS_JSON" ]]; then
+        ANNOTATE_ARGS=("$OUTPUT_FILE" "--strings-json" "$STRINGS_JSON")
+    else
+        ANNOTATE_ARGS=("$OUTPUT_FILE" "$EXE_ABS")
+        if [[ -n "${OVR_ABS:-}" ]]; then
+            ANNOTATE_ARGS+=("$OVR_ABS")
+        fi
     fi
     ANNOTATE_ARGS+=("-o" "$ANNOTATED_FILE")
     python3 "$ANNOTATE_PY" "${ANNOTATE_ARGS[@]}"
