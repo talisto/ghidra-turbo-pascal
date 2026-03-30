@@ -82,3 +82,32 @@ class TestDecompiledOutput:
         total = len(flirt_funcs) + len(renamed_funcs)
         assert total > 0, (
             f"{program} has no FLIRT-identified functions (original or renamed)")
+
+
+class TestTypeCleanup:
+    """Verify that Decompile.java cleans up Ghidra type artifacts."""
+
+    def test_no_undefined_types(self, decompiled_text, program):
+        """Output should not contain Ghidra's undefined type placeholders.
+
+        Decompile.java Phase 5 replaces undefined1/2/4/8 with byte/word/dword/qword."""
+        for undef in ['undefined1', 'undefined2', 'undefined4', 'undefined8']:
+            assert re.search(r'\b' + undef + r'\b', decompiled_text) is None, (
+                f"{program} still contains '{undef}' — type cleanup not applied")
+
+    def test_no_cdecl16_calling_convention(self, decompiled_text, program):
+        """Output should not contain __cdecl16near or __cdecl16far annotations.
+
+        These are 16-bit calling convention noise that makes output harder to read."""
+        assert '__cdecl16near' not in decompiled_text, (
+            f"{program} still contains '__cdecl16near' — convention cleanup not applied")
+        assert '__cdecl16far' not in decompiled_text, (
+            f"{program} still contains '__cdecl16far' — convention cleanup not applied")
+
+    def test_uses_standard_type_names(self, decompiled_text, program):
+        """Output should use standard type names (byte, word) instead of undefined."""
+        # After cleanup, at least some byte/word types should appear
+        has_byte = 'byte' in decompiled_text
+        has_word = 'word' in decompiled_text
+        assert has_byte or has_word, (
+            f"{program} has neither 'byte' nor 'word' types — cleanup may not be working")

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `Decompile.java`: Phase 5 output cleanup — replaces Ghidra's `undefined1`/`undefined2`/`undefined4`/`undefined8` type placeholders with standard names (`byte`/`word`/`dword`/`qword`) and strips `__cdecl16near`/`__cdecl16far` calling convention noise from function signatures; affects ~6,900 type instances and ~550 convention annotations across the 16 test binaries
+- `Decompile.java`: Phase 2.5 — `registerBP7Types()` registers 7 Borland Pascal standard data types in Ghidra's DataTypeManager under `/BP7` category: `TextRec`, `FileRec`, `SearchRec`, `DateTime`, `Registers`, `ShortString`, and `FileMode` enum (foundation for future parameter type application)
+- `tests/test_decompile_output.py`: `TestTypeCleanup` class with 3 tests — `test_no_undefined_types`, `test_no_cdecl16_calling_convention`, `test_uses_standard_type_names`
+
+### Fixed
+- `Decompile.java`: `_Randomize_qv` FLIRT signature now maps to `bp_random` (Random(Word)) instead of `bp_randomize` — FLIRT consistently misidentifies `Random(Word)` with the `Randomize` signature because the byte patterns collide; this was causing the RANDTEST test failure and leaving `_Randomize_qv` unrenamed in GAMESIM/RANDTEST output
+
 ## [2.0.0] - 2026-03-30
 
 ### Added

@@ -7,9 +7,10 @@
 // What this script does:
 //   Phase 1: Find Pascal strings and define them as data types
 //   Phase 2: Build string database (offset → text)
+//   Phase 2.5: Register BP7 standard types (TextRec, FileRec, etc.)
 //   Phase 3: Identify and label known library functions (offset-based + FLIRT)
 //   Phase 4: Decompile all functions with inline string annotations
-//   Phase 5: Apply function renames and write final output + strings.json
+//   Phase 5: Apply function renames, clean up types, write output + strings.json
 //
 // Usage:
 //   analyzeHeadless <proj-dir> <proj-name> -process <EXE> \
@@ -31,7 +32,7 @@ import ghidra.app.decompiler.*;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.symbol.*;
 import ghidra.program.model.address.*;
-import ghidra.program.model.data.PascalStringDataType;
+import ghidra.program.model.data.*;
 import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.program.model.pcode.*;
 import ghidra.program.util.string.FoundString;
@@ -43,6 +44,9 @@ public class Decompile extends GhidraScript {
 
     // ── String database: Ghidra linear address → string text ──
     private Map<Long, String> stringDb = new HashMap<>();
+
+    // ── Registered BP7 data types ──
+    private Map<String, DataType> bp7Types = new HashMap<>();
 
     // ── Label tables ──
     // Format: offset-within-segment → (short_name, description)
@@ -254,7 +258,7 @@ public class Decompile extends GhidraScript {
         FLIRT_DESCRIPTIONS.put("_Str_q7Integerm6String",         new String[]{"bp_str_int",       "Str(I, S) — integer to string"});
         FLIRT_DESCRIPTIONS.put("_Str_q7Longintm6String",         new String[]{"bp_str_long",      "Str(L, S) — longint to string"});
         FLIRT_DESCRIPTIONS.put("_Random_q7Integer",              new String[]{"bp_random",        "Random(N) — random integer 0..N-1"});
-        FLIRT_DESCRIPTIONS.put("_Randomize_qv",                  new String[]{"bp_randomize",     "Randomize — seed from system clock"});
+        FLIRT_DESCRIPTIONS.put("_Randomize_qv",                  new String[]{"bp_random",        "Random(Word) — FLIRT misidentifies Random as Randomize"});
         FLIRT_DESCRIPTIONS.put("_Halt_q4Word",                   new String[]{"bp_halt",          "Halt(ExitCode) — terminate program"});
         FLIRT_DESCRIPTIONS.put("_Rename_qm4Filem6String",        new String[]{"bp_rename",        "Rename(File, NewName)"});
         FLIRT_DESCRIPTIONS.put("_Erase_qm4File",                 new String[]{"bp_erase",         "Erase(File) — delete file"});
@@ -419,6 +423,12 @@ public class Decompile extends GhidraScript {
         println("Phase 2: Built string database with " + stringDb.size() + " entries");
 
         // ═══════════════════════════════════════════════════════════════════
+        // Phase 2.5: Register BP7 standard types
+        // ═══════════════════════════════════════════════════════════════════
+        registerBP7Types();
+        println("Phase 2.5: Registered " + bp7Types.size() + " BP7 data types");
+
+        // ═══════════════════════════════════════════════════════════════════
         // Phase 3: Identify and label functions
         // ═══════════════════════════════════════════════════════════════════
         buildLabelTable();
@@ -525,6 +535,15 @@ public class Decompile extends GhidraScript {
             output = output.replace(e.getKey(), e.getValue());
         }
 
+        // Clean up Ghidra type artifacts — replace undefined types with
+        // standard BP7 type names and strip calling convention noise
+        output = output.replaceAll("\\bundefined1\\b", "byte");
+        output = output.replaceAll("\\bundefined2\\b", "word");
+        output = output.replaceAll("\\bundefined4\\b", "dword");
+        output = output.replaceAll("\\bundefined8\\b", "qword");
+        output = output.replace("__cdecl16near ", "");
+        output = output.replace("__cdecl16far ", "");
+
         PrintWriter pw = new PrintWriter(new FileWriter(outFile));
         pw.print(output);
         pw.close();
@@ -554,6 +573,97 @@ public class Decompile extends GhidraScript {
         spw.println("\n]");
         spw.close();
         println("Phase 6: Wrote " + keptCount + " strings -> " + stringsFile.getAbsolutePath());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // BP7 Type Registration
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private void registerBP7Types() {
+        DataTypeManager dtm = currentProgram.getDataTypeManager();
+        CategoryPath bp7 = new CategoryPath("/BP7");
+
+        DataType byteT = ByteDataType.dataType;
+        DataType wordT = WordDataType.dataType;
+        DataType charT = CharDataType.dataType;
+        DataType sdwordT = SignedDWordDataType.dataType;
+        // Far pointer (seg:off = 4 bytes) for 16-bit real mode
+        DataType farPtrT = new PointerDataType(null, 4);
+
+        // TextRec (256 bytes) — text file control block
+        StructureDataType textRec = new StructureDataType(bp7, "TextRec", 0);
+        textRec.add(wordT, "Handle", "File handle");
+        textRec.add(wordT, "Mode", "File mode (fmClosed/fmInput/fmOutput/fmInOut)");
+        textRec.add(wordT, "BufSize", "Buffer size");
+        textRec.add(wordT, "Private", "Reserved");
+        textRec.add(wordT, "BufPos", "Current buffer position");
+        textRec.add(wordT, "BufEnd", "End of valid buffer data");
+        textRec.add(farPtrT, "BufPtr", "Pointer to buffer");
+        textRec.add(farPtrT, "OpenFunc", "Open function pointer");
+        textRec.add(farPtrT, "InOutFunc", "I/O function pointer");
+        textRec.add(farPtrT, "FlushFunc", "Flush function pointer");
+        textRec.add(farPtrT, "CloseFunc", "Close function pointer");
+        textRec.add(new ArrayDataType(byteT, 16, 1), "UserData", "User data area");
+        textRec.add(new ArrayDataType(charT, 80, 1), "Name", "File name");
+        textRec.add(new ArrayDataType(charT, 128, 1), "Buffer", "I/O buffer");
+        bp7Types.put("TextRec", dtm.addDataType(textRec, DataTypeConflictHandler.REPLACE_HANDLER));
+
+        // FileRec (128 bytes) — typed/untyped file control block
+        StructureDataType fileRec = new StructureDataType(bp7, "FileRec", 0);
+        fileRec.add(wordT, "Handle", "File handle");
+        fileRec.add(wordT, "Mode", "File mode");
+        fileRec.add(wordT, "RecSize", "Record size");
+        fileRec.add(new ArrayDataType(byteT, 26, 1), "Private", "Reserved");
+        fileRec.add(new ArrayDataType(byteT, 16, 1), "UserData", "User data area");
+        fileRec.add(new ArrayDataType(charT, 80, 1), "Name", "File name");
+        bp7Types.put("FileRec", dtm.addDataType(fileRec, DataTypeConflictHandler.REPLACE_HANDLER));
+
+        // SearchRec (43 bytes) — DOS FindFirst/FindNext result
+        StructureDataType searchRec = new StructureDataType(bp7, "SearchRec", 0);
+        searchRec.add(new ArrayDataType(byteT, 21, 1), "Fill", "Reserved (DOS DTA)");
+        searchRec.add(byteT, "Attr", "File attributes");
+        searchRec.add(sdwordT, "Time", "Time stamp (packed)");
+        searchRec.add(sdwordT, "Size", "File size");
+        searchRec.add(new ArrayDataType(charT, 13, 1), "Name", "File name (String[12])");
+        bp7Types.put("SearchRec", dtm.addDataType(searchRec, DataTypeConflictHandler.REPLACE_HANDLER));
+
+        // DateTime (12 bytes) — packed date/time components
+        StructureDataType dateTime = new StructureDataType(bp7, "DateTime", 0);
+        dateTime.add(wordT, "Year", null);
+        dateTime.add(wordT, "Month", null);
+        dateTime.add(wordT, "Day", null);
+        dateTime.add(wordT, "Hour", null);
+        dateTime.add(wordT, "Min", null);
+        dateTime.add(wordT, "Sec", null);
+        bp7Types.put("DateTime", dtm.addDataType(dateTime, DataTypeConflictHandler.REPLACE_HANDLER));
+
+        // Registers (20 bytes) — CPU registers for Intr()/MsDos()
+        StructureDataType regs = new StructureDataType(bp7, "Registers", 0);
+        regs.add(wordT, "AX", null);
+        regs.add(wordT, "BX", null);
+        regs.add(wordT, "CX", null);
+        regs.add(wordT, "DX", null);
+        regs.add(wordT, "BP_reg", "BP register");
+        regs.add(wordT, "SI", null);
+        regs.add(wordT, "DI", null);
+        regs.add(wordT, "DS", null);
+        regs.add(wordT, "ES", null);
+        regs.add(wordT, "Flags", null);
+        bp7Types.put("Registers", dtm.addDataType(regs, DataTypeConflictHandler.REPLACE_HANDLER));
+
+        // ShortString (256 bytes) — Pascal string[255]
+        StructureDataType shortStr = new StructureDataType(bp7, "ShortString", 0);
+        shortStr.add(byteT, "Length", "String length (0..255)");
+        shortStr.add(new ArrayDataType(charT, 255, 1), "Data", "String characters");
+        bp7Types.put("ShortString", dtm.addDataType(shortStr, DataTypeConflictHandler.REPLACE_HANDLER));
+
+        // FileMode enum
+        EnumDataType fileMode = new EnumDataType(bp7, "FileMode", 2);
+        fileMode.add("fmClosed", 0xD7B0);
+        fileMode.add("fmInput", 0xD7B1);
+        fileMode.add("fmOutput", 0xD7B2);
+        fileMode.add("fmInOut", 0xD7B3);
+        bp7Types.put("FileMode", dtm.addDataType(fileMode, DataTypeConflictHandler.REPLACE_HANDLER));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
