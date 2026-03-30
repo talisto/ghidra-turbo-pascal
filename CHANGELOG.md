@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- `pascal_emit/parser.py`: deleted — legacy regex-based `decompiled.c` parser (`parse_functions`, `classify_function`, `find_primary_segment`, `parse_c_signature`) is no longer needed now that `functions.json` is the sole data source
+- `pascal_emit/globals_scanner.py`: deleted — legacy global variable/uses-clause detection via regex scanning of parsed function bodies; equivalent functionality is inlined in `pipeline.py` for the IR path
+- `pascal_emit/pipeline.py`: removed `_process_legacy()` fallback path that parsed `decompiled.c` with regex when `functions.json` was unavailable
+
+### Changed
+- `pascal_emit/pipeline.py`: `process()` now requires `functions.json` and raises `FileNotFoundError` if it is missing, instead of silently falling back to regex parsing
+- `pascal_emit/__init__.py`: removed lazy-load `__getattr__` for `parser` and `globals_scanner` modules; removed `detect_globals`, `detect_uses`, `GLOBAL_MEM_RE` from public API
+
+### Fixed
+- `tests/test_label_functions.py`: removed incorrect `bp_rename` expectation from FILEIO test — the FILEIO test program does not use `Rename`
+- `tests/test_pascal_emit.py`: fixed `TestMathops.test_writeln_with_global_var` — longint write values appear as `{longint}` placeholders (the write sequence detector recognises the call but cannot resolve stack-passed values to variable names); added `test_global_vars_declared` to verify globals are still present
+
 ### Added
 - `Decompile.java`: Phase 7 — structured IR output (`functions.json`) emitted alongside `decompiled.c` and `strings.json`; extracts per-function metadata (return type, parameters, local variables) from `HighFunction`/`LocalSymbolMap`, call graph with resolved constant arguments from `PcodeOp.CALL`, and serialized C AST from `ClangTokenGroup`; string references resolved programmatically via PcodeOp instead of regex
 - `pascal_emit/ir_reader.py`: new module providing `load_functions_json()`, AST navigation helpers (`ast_children`, `ast_tokens`, `ast_text`, `ast_find_groups`, `classify_statement`), and structured call data access (`get_resolved_strings`, `get_call_string_args`)

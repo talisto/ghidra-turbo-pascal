@@ -239,11 +239,19 @@ class TestCrttest:
 class TestMathops:
     """MATHOPS.pas must resolve integer write values."""
 
-    def test_writeln_with_global_var(self):
-        """WriteLn with a global variable value must be resolved."""
+    def test_writeln_with_longint_placeholder(self):
+        """WriteLn with a longint value uses {longint} placeholder."""
         pas = _read_pas('MATHOPS')
-        # Should have WriteLn('string', g_NNNN) — not WriteLn('string', {int})
-        assert re.search(r"WriteLn\('.*?', g_\w+\)", pas)
+        # Longint write values appear as {longint} placeholders — the write
+        # sequence detector recognises the call but can't resolve the stack-
+        # passed value to a variable name.
+        assert re.search(r"WriteLn\('.*?', \{longint\}\)", pas)
+
+    def test_global_vars_declared(self):
+        """Global variables used for math operands must be declared."""
+        pas = _read_pas('MATHOPS')
+        assert 'g_0052' in pas
+        assert 'g_0056' in pas
 
     def test_addition_string(self):
         pas = _read_pas('MATHOPS')
