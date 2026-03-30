@@ -26,7 +26,7 @@
 //   - This resolves EXE → overlay cross-references in the decompiled output
 //
 // For Borland DOS executables that use external overlays (e.g., LORD 4.08),
-// run this BEFORE DecompileAll.java so both EXE and OVR functions are decompiled.
+// run this BEFORE Decompile.java so both EXE and OVR functions are decompiled.
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;

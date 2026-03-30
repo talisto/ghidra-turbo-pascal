@@ -27,7 +27,7 @@ import struct
 import re
 from collections import defaultdict
 
-# ── Reuse string reader from annotate_strings.py ────────────────────────────
+# ── Pascal string reader ─────────────────────────────────────────────────────
 
 def _is_displayable_start(b: int) -> bool:
     return 0x20 <= b <= 0x7e

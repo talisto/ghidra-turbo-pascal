@@ -7,11 +7,9 @@ A Ghidra-based decompilation pipeline for **DOS MZ executables compiled with Bor
 | Path | Description |
 |------|-------------|
 | `decompile.sh` | Shell wrapper — the recommended entry point for the full pipeline |
-| `DecompileAll.java` | Ghidra headless script: decompiles all functions to C pseudocode |
+| `Decompile.java` | Ghidra headless script: decompiles, annotates strings, and labels functions |
 | `LoadExternalOverlay.java` | Ghidra headless script: loads Borland VROOMM `.OVR` overlay files |
 | `ApplySigHeadless.py` | PyGhidra script: applies IDA FLIRT `.sig` files to rename RTL stubs |
-| `annotate_strings.py` | Post-processor: adds inline string comments to decompiled C output |
-| `label_functions.py` | Post-processor: identifies and labels known library function patterns |
 | `analyze_exe.py` | Structural analyser: segment map, string table, cross-reference report |
 | `sigs/` | Pre-extracted IDA FLIRT sig files for Borland Pascal / Turbo Pascal |
 | `tests/` | Test programs and expected outputs for validating the pipeline |
@@ -32,16 +30,12 @@ chmod +x decompile.sh
 ./decompile.sh --help
 ```
 
-The script runs a full multi-pass pipeline:
+The script runs the full pipeline:
 
 1. **Pass 1a** — Import and analyze the EXE in Ghidra
 2. **Pass 1b** — Apply FLIRT signatures to rename anonymous RTL stubs (with `--sigs`)
 3. **Pass 1c** — Load external Borland overlay (if a `.OVR` file is detected or specified with `--ovr`)
-4. **Pass 2** — Decompile all functions to `decompiled.c`
-5. **Pass 3** — Annotate with inline string comments → `decompiled.annotated.c`
-6. **Pass 4** — Label known library function patterns → `decompiled.labeled.c`
-
-The labeled file is the richest output — it has both string annotations AND function labels.
+4. **Pass 2** — Decompile all functions with inline string annotations and function labels → `decompiled.c`
 
 ## Requirements
 
@@ -128,45 +122,7 @@ The scripts accept absolute paths, so you can invoke them from anywhere:
     /path/to/project/MYPROG.EXE
 ```
 
-### Post-Processing Scripts
-
-The pipeline runs these automatically, but they can also be used standalone:
-
-#### String Annotation
-
-Ghidra's decompiled output for Borland Pascal contains no string literals — display calls appear as raw integer constants. `annotate_strings.py` resolves these to inline `/* "..." */` comments:
-
-```bash
-python3 annotate_strings.py \
-    /path/to/output/decompiled.c \
-    /path/to/MYPROG.EXE \
-    [/path/to/MYPROG.OVR]          # optional — for overlay binaries
-
-# Output: /path/to/output/decompiled.annotated.c
-```
-
-Before/after:
-```c
-// Before:
-FUN_265c_02a8(0x1ebf,0x32e9);
-
-// After:
-FUN_265c_02a8(0x1ebf,0x32e9);  /* "`2  While walking down a tunnel, you hear a scary voice." */
-```
-
-#### Function Labeling
-
-`label_functions.py` identifies known Borland Pascal RTL patterns and labels them:
-
-```bash
-python3 label_functions.py \
-    /path/to/output/decompiled.annotated.c \
-    -o /path/to/output/decompiled.labeled.c
-```
-
-Labels include Borland Pascal RTL functions (`bp_str_concat`, `bp_random`, `bp_file_assign`, etc.), display/input library functions, and conversion utilities.
-
-#### Structural Analysis
+### Structural Analysis
 
 `analyze_exe.py` produces a detailed report of the binary's structure:
 
@@ -198,9 +154,9 @@ SIGS=/path/to/ghidra-turbo-pascal/sigs
   -postScript ApplySigHeadless.py "$SIGS/tptv.sig" \
   -scriptPath /path/to/ghidra-turbo-pascal
 
-# Pass 2: Decompile (Java scripts use regular analyzeHeadless)
+# Pass 2: Decompile with annotations + labels (Java script, uses analyzeHeadless)
 "$GHIDRA" "$PROJ" MyProject -process MYPROG.EXE \
-  -postScript DecompileAll.java /path/to/output/decompiled.c \
+  -postScript Decompile.java /path/to/output/decompiled.c \
   -scriptPath /path/to/ghidra-turbo-pascal
 ```
 

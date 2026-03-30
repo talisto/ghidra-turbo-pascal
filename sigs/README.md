@@ -113,7 +113,7 @@ Rules:
 - `var` parameters: prefix `m` instead of length (e.g., `m4Word`)
 - No parameters: `qv` (void)
 
-These names must match what `tpdos.sig` and other IDA sigs use, so that `FLIRT_DESCRIPTIONS` in `label_functions.py` can map them to human-readable labels.
+These names must match what `tpdos.sig` and other IDA sigs use, so that `FLIRT_DESCRIPTIONS` in `Decompile.java` can map them to human-readable labels.
 
 ### Sig File Binary Format (Version 5)
 
@@ -183,7 +183,7 @@ Root node:
 4. **Map offsets to FLIRT names** following the mangling convention above
 5. **Create a `.funcs` file** in `sigs/` with the offset-to-name mappings (see `sigs/ddplus.funcs` for format)
 6. **Generate and validate**: run `gen_sig.py` with `--segment` and `--name`, then verify with `dumpsig` or `scripts/test_sig.py`
-7. **Add `FLIRT_DESCRIPTIONS`** entries in `label_functions.py` so the labeled output shows human-readable names
+7. **Add `FLIRT_DESCRIPTIONS`** entries in `Decompile.java` so the labeled output shows human-readable names
 
 ---
 

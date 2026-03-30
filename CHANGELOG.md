@@ -8,10 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `annotate_strings.py`: new `load_string_db_from_json()` function — loads the string database from a `strings.json` produced by `DecompileAll.java` (Ghidra's built-in `findPascalStrings`) instead of re-scanning the raw EXE bytes; same quality filters applied to discard low-ratio false positives
-- `annotate_strings.py`: new `--strings-json <file>` CLI argument — when supplied, the EXE file argument becomes optional and the EXE byte scan is skipped entirely
-- `decompile.sh`: Pass 3 now passes `strings.json` (written by Pass 2) to `annotate_strings.py` via `--strings-json` when the file exists; falls back to raw EXE scanning when it does not
-- `tests/test_annotate_strings.py`: two new unit tests — `test_load_string_db_from_json` (verifies JSON loader with quality filtering) and `test_gamesim_strings_json_loads_real_strings` (verifies real GAMESIM strings are present in loaded DB)
+- `Decompile.java`: consolidated single-pass GhidraScript replacing the previous 3-step pipeline (`DecompileAll.java` + `annotate_strings.py` + `label_functions.py`); performs Pascal string discovery, string database construction, function labeling (offset tables + FLIRT renaming + pattern detection), decompilation with inline string annotations, and `strings.json` output — all in one `analyzeHeadless` invocation
+- `Decompile.java`: full port of all label tables — `BP_SYSTEM_LABELS`, `BP_SYSTEM_CORE_LABELS`, `RHP_DISPLAY_LABELS`, `RHP_INPUT_LABELS`, `CONV_LABELS`, `TIMER_LABELS`, `RECORD_LABELS`, `DDPLUS_LABELS`, `DDPLUS_IO_LABELS`, `CRT_UNIT_LABELS`, plus `FLIRT_DESCRIPTIONS` and `FLIRT_PLAIN_DESCRIPTIONS` (~100+ entries)
+- `Decompile.java`: pattern-based function identification using Ghidra's `HighFunction` and PcodeOps API — structural analysis of decompiled IR
+
+### Changed
+- `decompile.sh`: pipeline reduced from 4 passes (import → FLIRT → decompile → annotate → label) to 2 passes (import → FLIRT → Decompile.java); backward-compatible `.annotated.c` and `.labeled.c` copies still produced
+
+### Removed
+- `DecompileAll.java`: replaced by `Decompile.java`
+- `annotate_strings.py`: string annotation consolidated into `Decompile.java`
+- `label_functions.py`: function labeling consolidated into `Decompile.java`
+- `TestGhidraAPIs.java`, `MinimalTest.java`, `fix_test_script.py`: temporary test/diagnostic files
+- `tests/test_annotate_strings.py::TestStringExtractionFromEXE`: tests that imported `annotate_strings` module
+- `tests/test_label_functions.py::TestPatternDetection`, `TestFlirtDecoding`, `TestLabelLine`, `TestApplyRenames`: tests that imported `label_functions` module
 
 ## [1.2.2] - 2026-03-29
 

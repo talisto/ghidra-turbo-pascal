@@ -65,10 +65,22 @@ class TestDecompiledOutput:
         assert 'Low-level Error' not in decompiled_text, f"{program} has Low-level Error"
 
     def test_has_flirt_functions(self, decompiled_text, program):
-        """Every TP7 binary should have at least some FLIRT-identified functions."""
-        # FLIRT names have patterns like @Write$q... (rendered as _Write_q...)
+        """Every TP7 binary should have at least some FLIRT-identified functions.
+        Decompile.java may rename FLIRT names to short labels (e.g.
+        _WriteLn_qm4Text → bp_writeln), so we check for either pattern."""
+        # FLIRT names that survived renaming (original mangled form)
         flirt_funcs = re.findall(
             r'_[A-Za-z]\w*_q[A-Za-z0-9]+|__[A-Z][A-Za-z]+',
             decompiled_text)
-        assert len(flirt_funcs) > 0, (
-            f"{program} has no FLIRT-identified functions")
+        # Renamed FLIRT functions (bp_write*, crt_*, dos_*, etc.)
+        renamed_funcs = re.findall(
+            r'\b(?:bp_write\w+|bp_read\w+|bp_random\w*|bp_halt\w*|bp_assign\w*|'
+            r'bp_concat|bp_copy|bp_pos|bp_delete|bp_insert|bp_str_\w+|bp_val_\w+|'
+            r'bp_length|bp_ioresult|bp_upcase|bp_runerror|bp_new|bp_dispose|'
+            r'bp_getmem|bp_freemem|bp_memavail|bp_maxavail|bp_eof\w*|bp_erase|'
+            r'bp_rename|bp_reset|bp_rewrite|bp_close|bp_seek|bp_filesize|bp_filepos|'
+            r'crt_\w+|dos_\w+|ddp_\w+|comio_\w+|ovr_\w+)\b',
+            decompiled_text)
+        total = len(flirt_funcs) + len(renamed_funcs)
+        assert total > 0, (
+            f"{program} has no FLIRT-identified functions (original or renamed)")

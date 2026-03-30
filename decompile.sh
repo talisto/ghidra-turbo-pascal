@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # decompile.sh — Ghidra headless decompiler wrapper for DOS executables
 #
-# Automates the full two-pass pipeline:
+# Automates the decompilation pipeline:
 #   Pass 1a: Import + analyze EXE into Ghidra project
 #   Pass 1b: (optional) Apply IDA FLIRT signatures to rename RTL stubs
-#   Pass 2:  Decompile all functions to a .c file
+#   Pass 2:  Decompile all functions with string annotation + function labeling
+#            (Decompile.java — consolidated single-pass decompiler)
 #
 # Usage:
 #   decompile.sh [options] <exe-path>
@@ -214,59 +215,21 @@ if [[ -n "${OVR_ABS:-}" ]]; then
     echo ""
 fi
 
-# ── Pass 2: Decompile ─────────────────────────────────────────────────────────
-echo "--- Pass 2: Decompiling to $OUTPUT_FILE ..."
+# ── Pass 2: Decompile (enhanced — includes string annotation + labeling) ──────
+echo "--- Pass 2: Decompiling (enhanced) to $OUTPUT_FILE ..."
 "$GHIDRA" "$PROJECT_DIR" "${EXE_NAME}Project" \
     -process "$EXE_BASENAME" \
-    -postScript DecompileAll.java "$OUTPUT_FILE" \
+    -postScript Decompile.java "$OUTPUT_FILE" \
     -scriptPath "$SCRIPTS_DIR" \
     2>&1 | tail -10
 echo ""
 
-# ── Pass 3: Annotate string references ───────────────────────────────────────
-# Uses annotate_strings.py to look up Pascal length-prefixed strings at the
-# constant pairs that appear in Borland Pascal display-function calls, and adds
-# inline /* "text" */ comments to the decompiled output.
-# Prefers strings.json (written by DecompileAll.java via Ghidra's built-in
-# findPascalStrings) when available; falls back to scanning the raw EXE bytes.
+# Create backward-compatible copies (enhanced output includes annotations + labels)
 ANNOTATED_FILE="${OUTPUT_FILE%.c}.annotated.c"
-STRINGS_JSON="$OUTPUT_DIR/strings.json"
-ANNOTATE_PY="$SCRIPT_DIR/annotate_strings.py"
-if [[ -f "$ANNOTATE_PY" ]] && command -v python3 &>/dev/null; then
-    echo "--- Pass 3: Annotating string references → $ANNOTATED_FILE ..."
-    if [[ -f "$STRINGS_JSON" ]]; then
-        ANNOTATE_ARGS=("$OUTPUT_FILE" "--strings-json" "$STRINGS_JSON")
-    else
-        ANNOTATE_ARGS=("$OUTPUT_FILE" "$EXE_ABS")
-        if [[ -n "${OVR_ABS:-}" ]]; then
-            ANNOTATE_ARGS+=("$OVR_ABS")
-        fi
-    fi
-    ANNOTATE_ARGS+=("-o" "$ANNOTATED_FILE")
-    python3 "$ANNOTATE_PY" "${ANNOTATE_ARGS[@]}"
-    echo ""
-else
-    echo "--- Pass 3: Skipping string annotation (annotate_strings.py or python3 not found)"
-    echo ""
-fi
-
-# ── Pass 4: Label known Borland Pascal / RHP functions ──────────────────────
-# Uses label_functions.py to identify common RTL, display, input, file I/O, and
-# string manipulation functions and add descriptive comments.
 LABELED_FILE="${OUTPUT_FILE%.c}.labeled.c"
-LABEL_PY="$SCRIPT_DIR/label_functions.py"
-if [[ -f "$LABEL_PY" ]] && command -v python3 &>/dev/null; then
-    # Prefer annotated file as input so labels augment string annotations
-    LABEL_INPUT="${ANNOTATED_FILE}"
-    if [[ ! -f "$LABEL_INPUT" ]]; then
-        LABEL_INPUT="$OUTPUT_FILE"
-    fi
-    echo "--- Pass 4: Labeling known functions → $LABELED_FILE ..."
-    python3 "$LABEL_PY" "$LABEL_INPUT" -o "$LABELED_FILE"
-    echo ""
-else
-    echo "--- Pass 4: Skipping function labeling (label_functions.py or python3 not found)"
-    echo ""
+if [[ -f "$OUTPUT_FILE" ]]; then
+    cp "$OUTPUT_FILE" "$ANNOTATED_FILE"
+    cp "$OUTPUT_FILE" "$LABELED_FILE"
 fi
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
