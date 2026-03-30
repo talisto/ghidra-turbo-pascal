@@ -33,11 +33,9 @@ class TestDecompiledOutput:
     """Validate the raw decompiled.c output from Ghidra."""
 
     def test_output_files_exist(self, program):
-        """All three pipeline output files must exist."""
+        """Pipeline output file must exist."""
         prog_dir = os.path.join(OUTPUT_DIR, program)
         assert os.path.isfile(os.path.join(prog_dir, 'decompiled.c'))
-        assert os.path.isfile(os.path.join(prog_dir, 'decompiled.annotated.c'))
-        assert os.path.isfile(os.path.join(prog_dir, 'decompiled.labeled.c'))
 
     def test_minimum_functions(self, program, decompiled_text):
         """Each program should decompile to at least MIN_FUNCTIONS functions."""

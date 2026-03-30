@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `sigs/bp7_signatures.json`: hash-based function signature database (90 entries, 89 unique names) — experimental alternative to FLIRT `.sig` files; retained for future use
 
 ### Changed
-- `decompile.sh`: pipeline reduced from 4 passes (import → FLIRT → decompile → annotate → label) to 2 passes (import → FLIRT → Decompile.java); backward-compatible `.annotated.c` and `.labeled.c` copies still produced
+- `decompile.sh`: pipeline reduced from 4 passes (import → FLIRT → decompile → annotate → label) to 2 passes (import → FLIRT → Decompile.java); single `decompiled.c` output (removed redundant `.annotated.c` and `.labeled.c` copies)
 
 ### Removed
 - `DecompileAll.java`: replaced by `Decompile.java`

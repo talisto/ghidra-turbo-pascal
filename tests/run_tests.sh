@@ -65,8 +65,7 @@ for exe_file in "${exe_files[@]}"; do
 
     # Validate output files exist
     decompiled="$test_output/decompiled.c"
-    annotated="$test_output/decompiled.annotated.c"
-    labeled="$test_output/decompiled.labeled.c"
+
 
     if [[ ! -f "$decompiled" ]]; then
         echo "  FAIL: decompiled.c not created"
@@ -87,19 +86,9 @@ for exe_file in "${exe_files[@]}"; do
         continue
     fi
 
-    # Check annotated file exists
-    if [[ -f "$annotated" ]]; then
-        ann_lines=$(grep -c '/\*.*".*"\s*\*/' "$annotated" 2>/dev/null || echo "0")
-    else
-        ann_lines="N/A"
-    fi
-
-    # Check labeled file exists
-    if [[ -f "$labeled" ]]; then
-        label_lines=$(grep -c 'bp_\|crt_\|dos_\|rhp_\|ovr_' "$labeled" 2>/dev/null || echo "0")
-    else
-        label_lines="N/A"
-    fi
+    # Count annotations and labels in decompiled.c
+    ann_lines=$(grep -c '/\*.*".*"\s*\*/' "$decompiled" 2>/dev/null || echo "0")
+    label_lines=$(grep -c 'bp_\|crt_\|dos_\|rhp_\|ovr_' "$decompiled" 2>/dev/null || echo "0")
 
     # Check for the PAS source to verify expected features
     pas_file="$DATA_DIR/$exe_name.PAS"

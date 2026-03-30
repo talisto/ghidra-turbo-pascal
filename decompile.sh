@@ -224,14 +224,6 @@ echo "--- Pass 2: Decompiling (enhanced) to $OUTPUT_FILE ..."
     2>&1 | tail -10
 echo ""
 
-# Create backward-compatible copies (enhanced output includes annotations + labels)
-ANNOTATED_FILE="${OUTPUT_FILE%.c}.annotated.c"
-LABELED_FILE="${OUTPUT_FILE%.c}.labeled.c"
-if [[ -f "$OUTPUT_FILE" ]]; then
-    cp "$OUTPUT_FILE" "$ANNOTATED_FILE"
-    cp "$OUTPUT_FILE" "$LABELED_FILE"
-fi
-
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 if [[ "$KEEP_PROJECT" == "false" ]]; then
     echo "--- Cleaning up Ghidra project at $PROJECT_DIR ..."
@@ -241,12 +233,6 @@ fi
 # ── Report ────────────────────────────────────────────────────────────────────
 echo "=== Done ==="
 echo "Output: $OUTPUT_FILE"
-if [[ -f "$ANNOTATED_FILE" ]]; then
-    echo "Annotated: $ANNOTATED_FILE"
-fi
-if [[ -f "$LABELED_FILE" ]]; then
-    echo "Labeled:   $LABELED_FILE"
-fi
 if [[ -f "$OUTPUT_FILE" ]]; then
     FUNC_COUNT=$(grep -c "^// Function:" "$OUTPUT_FILE" 2>/dev/null || echo "?")
     LINE_COUNT=$(wc -l < "$OUTPUT_FILE" | tr -d ' ')

@@ -70,7 +70,7 @@ class TestStringAnnotationRegression:
         Regression: The old code matched 0x10a in pointer arithmetic
         `puVar8 + -0x10a` as string offset → false 'After Insert:' floods.
         """
-        path = os.path.join(OUTPUT_DIR, 'STRINGS', 'decompiled.annotated.c')
+        path = os.path.join(OUTPUT_DIR, 'STRINGS', 'decompiled.c')
         if not os.path.isfile(path):
             pytest.skip("STRINGS output not available")
         with open(path, encoding='utf-8', errors='replace') as f:
@@ -84,7 +84,7 @@ class TestStringAnnotationRegression:
 
     def test_gamesim_has_string_annotations(self):
         """GAMESIM should have meaningful string annotations."""
-        path = os.path.join(OUTPUT_DIR, 'GAMESIM', 'decompiled.annotated.c')
+        path = os.path.join(OUTPUT_DIR, 'GAMESIM', 'decompiled.c')
         if not os.path.isfile(path):
             pytest.skip("GAMESIM output not available")
         with open(path, encoding='utf-8', errors='replace') as f:

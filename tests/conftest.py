@@ -40,26 +40,6 @@ def decompiled_text(decompiled_path):
 
 
 @pytest.fixture
-def annotated_path(program):
-    """Path to the annotated output."""
-    return os.path.join(OUTPUT_DIR, program, 'decompiled.annotated.c')
-
-
-@pytest.fixture
-def annotated_text(annotated_path):
-    """Contents of decompiled.annotated.c."""
-    with open(annotated_path, encoding='utf-8', errors='replace') as f:
-        return f.read()
-
-
-@pytest.fixture
-def labeled_path(program):
-    """Path to the labeled output."""
-    return os.path.join(OUTPUT_DIR, program, 'decompiled.labeled.c')
-
-
-@pytest.fixture
-def labeled_text(labeled_path):
-    """Contents of decompiled.labeled.c."""
-    with open(labeled_path, encoding='utf-8', errors='replace') as f:
-        return f.read()
+def annotated_text(decompiled_text):
+    """Annotations are in decompiled.c (single output file)."""
+    return decompiled_text
