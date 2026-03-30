@@ -1,6 +1,6 @@
 # ghidra-turbo-pascal
 
-A Ghidra-based decompilation pipeline for **DOS MZ executables compiled with Borland Pascal 7 / Turbo Pascal 7**. Automates the full workflow: importing, applying FLIRT signatures to rename anonymous RTL stubs, handling Borland VROOMM overlay files, decompiling to C pseudocode, annotating string references, and labeling known library functions.
+A Ghidra-based decompilation pipeline for **DOS MZ executables compiled with Borland Pascal 7 / Turbo Pascal 7**. Produces reconstructed **Pascal source code** from compiled binaries. Automates the full workflow: importing, applying FLIRT signatures, handling Borland VROOMM overlay files, decompiling to C pseudocode, annotating string references, labeling known library functions, and transpiling the result to Pascal.
 
 ## What's Included
 
@@ -8,6 +8,7 @@ A Ghidra-based decompilation pipeline for **DOS MZ executables compiled with Bor
 |------|-------------|
 | `decompile.sh` | Shell wrapper — the recommended entry point for the full pipeline |
 | `Decompile.java` | Ghidra headless script: decompiles, annotates strings, and labels functions |
+| `pascal_emit.py` | C-to-Pascal transpiler: converts decompiled C pseudocode to `.pas` source |
 | `LoadExternalOverlay.java` | Ghidra headless script: loads Borland VROOMM `.OVR` overlay files |
 | `ApplySigHeadless.py` | PyGhidra script: applies IDA FLIRT `.sig` files to rename RTL stubs |
 | `analyze_exe.py` | Structural analyser: segment map, string table, cross-reference report |
@@ -36,6 +37,20 @@ The script runs the full pipeline:
 2. **Pass 1b** — Apply FLIRT signatures to rename anonymous RTL stubs (with `--sigs`)
 3. **Pass 1c** — Load external Borland overlay (if a `.OVR` file is detected or specified with `--ovr`)
 4. **Pass 2** — Decompile all functions with inline string annotations and function labels → `decompiled.c`
+
+### Step 2 — Generate Pascal Source
+
+After decompilation, convert the C pseudocode to Pascal:
+
+```bash
+python3 pascal_emit.py /path/to/output/decompiled.c
+```
+
+This produces a `.pas` file alongside `decompiled.c` with:
+- Pascal syntax (`begin`/`end`, `:=`, `var` blocks, etc.)
+- Resolved string literals from inline annotations and direct EXE binary reads
+- Borland Pascal RTL calls translated to idiomatic Pascal (`WriteLn`, `ReadLn`, `GotoXY`, etc.)
+- Library/runtime functions filtered out — only application code is emitted
 
 ## Requirements
 
@@ -110,6 +125,9 @@ If `pyghidraRun -H` fails:
 
 # Different output filename
 ./decompile.sh --sigs --output-file /path/to/output/decompiled-sig.c /path/to/MYPROG.EXE
+
+# Then generate Pascal source
+python3 pascal_emit.py /path/to/output/decompiled.c
 ```
 
 ### Using from Another Project
@@ -201,8 +219,15 @@ Borland's VROOMM overlay system stores code in external `.OVR` files alongside t
 
 ## Tests
 
-The test suite validates the pipeline against 14 compiled Turbo Pascal test programs:
+The test suite validates the pipeline against 16 compiled Turbo Pascal test programs:
 
 ```bash
+# Run all tests (decompilation + Pascal emission)
 python -m pytest tests/ --tb=short -q
 ```
+
+Tests cover:
+- **Decompilation output** — function decompilation, control flow, type handling
+- **String annotation** — Pascal length-prefixed string resolution and inline annotation
+- **Function labeling** — hash-based RTL signature matching
+- **Pascal emission** — C-to-Pascal transpilation, string resolution, WriteLn/ReadLn handling

@@ -46,6 +46,8 @@ public class Decompile extends GhidraScript {
 
     // ── String database: Ghidra linear address → string text ──
     private Map<Long, String> stringDb = new HashMap<>();
+    // ── String address labels: linear address → "seg:off" string for JSON ──
+    private Map<Long, String> stringAddrDb = new HashMap<>();
 
     // ── Registered BP7 data types ──
     private Map<String, DataType> bp7Types = new HashMap<>();
@@ -421,8 +423,18 @@ public class Decompile extends GhidraScript {
             if (text == null || !isQualityString(text)) continue;
             long linearAddr = fs.getAddress().getOffset();
             stringDb.put(linearAddr, renderString(text));
+            stringAddrDb.put(linearAddr, fs.getAddress().toString());
         }
-        println("Phase 2: Built string database with " + stringDb.size() + " entries");
+
+        // Phase 2b: Custom scan for Pascal strings in CODE segments
+        // Ghidra's findPascalStrings() misses strings embedded in code regions —
+        // Borland Pascal packs const strings at the start of code segments
+        // before the first instruction, and findPascalStrings only scans
+        // defined data areas.
+        int customFound = scanCodeSegmentStrings();
+
+        println("Phase 2: Built string database with " + stringDb.size()
+            + " entries (" + customFound + " from code segment scan)");
 
         // ═══════════════════════════════════════════════════════════════════
         // Phase 2.5: Register BP7 standard types
@@ -585,21 +597,24 @@ public class Decompile extends GhidraScript {
         println("Phase 5: Written " + outFile.getAbsolutePath());
 
         // ═══════════════════════════════════════════════════════════════════
-        // Phase 6: Write strings.json
+        // Phase 6: Write strings.json from stringDb
         // ═══════════════════════════════════════════════════════════════════
         File stringsFile = new File(outFile.getParentFile(), "strings.json");
         PrintWriter spw = new PrintWriter(new FileWriter(stringsFile));
         spw.println("[");
         boolean first = true;
         int keptCount = 0;
-        for (FoundString fs : pascalStrings) {
-            String text = fs.getString(currentProgram.getMemory());
-            if (text == null || !isQualityString(text)) continue;
+
+        // Sort by offset for stable output
+        List<Long> sortedOffsets = new ArrayList<>(stringDb.keySet());
+        Collections.sort(sortedOffsets);
+
+        for (long offset : sortedOffsets) {
+            String text = stringDb.get(offset);
+            String addrStr = stringAddrDb.getOrDefault(offset, String.format("%04x:%04x", offset >> 4, offset & 0xF));
             String escaped = escapeJson(text);
-            String addr = fs.getAddress().toString();
-            long offset = fs.getAddress().getOffset();
             if (!first) spw.println(",");
-            spw.print("  {\"address\": \"" + addr + "\", \"offset\": " + offset
+            spw.print("  {\"address\": \"" + addrStr + "\", \"offset\": " + offset
                 + ", \"string\": \"" + escaped + "\"}");
             first = false;
             keptCount++;
@@ -1280,8 +1295,12 @@ public class Decompile extends GhidraScript {
     }
 
     private boolean isQualityString(String text) {
+        return isQualityString(text, 4);
+    }
+
+    private boolean isQualityString(String text, int minLen) {
         int len = text.length();
-        if (len < 4) return false;
+        if (len < minLen) return false;
         if (text.charAt(0) < 0x20 || text.charAt(0) > 0x7e) return false;
         for (int i = 1; i < Math.min(6, len); i++) {
             char c = text.charAt(i);
@@ -1308,5 +1327,96 @@ public class Decompile extends GhidraScript {
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
+    }
+
+    /**
+     * Scan memory blocks for Pascal length-prefixed strings that Ghidra's
+     * findPascalStrings() misses. Borland Pascal packs const strings
+     * sequentially at the start of code segments: [len][chars][len][chars]...
+     *
+     * The scanner reads raw bytes, validates each candidate as printable
+     * ASCII, and adds it to stringDb if it passes quality checks.
+     *
+     * Returns the number of new strings added.
+     */
+    private int scanCodeSegmentStrings() {
+        ghidra.program.model.mem.Memory mem = currentProgram.getMemory();
+        int found = 0;
+
+        for (ghidra.program.model.mem.MemoryBlock block : mem.getBlocks()) {
+            if (!block.isInitialized()) continue;
+
+            Address start = block.getStart();
+            long blockSize = block.getSize();
+
+            // Scan from the start of each block for Pascal strings
+            long offset = 0;
+            int consecutiveMisses = 0;
+
+            while (offset < blockSize && offset < 0x2000) {
+                // Stop scanning if we hit too many non-string bytes
+                // (we've left the const string area and entered code)
+                if (consecutiveMisses > 16) break;
+
+                try {
+                    Address addr = start.add(offset);
+                    int len = mem.getByte(addr) & 0xFF;
+
+                    // Length byte must be 1-255
+                    if (len == 0) {
+                        offset++;
+                        consecutiveMisses++;
+                        continue;
+                    }
+
+                    // Don't read past the block or our scan window
+                    if (offset + 1 + len > blockSize || offset + 1 + len > 0x2000) {
+                        break;
+                    }
+
+                    // Read the string bytes
+                    byte[] strBytes = new byte[len];
+                    mem.getBytes(addr.add(1), strBytes);
+
+                    // Validate: all bytes must be printable ASCII (0x20-0x7E)
+                    boolean valid = true;
+                    for (int i = 0; i < len; i++) {
+                        int b = strBytes[i] & 0xFF;
+                        if (b < 0x20 || b > 0x7E) {
+                            valid = false;
+                            break;
+                        }
+                    }
+
+                    if (!valid || len < 2) {
+                        offset++;
+                        consecutiveMisses++;
+                        continue;
+                    }
+
+                    String text = new String(strBytes, "US-ASCII");
+                    long linearAddr = addr.getOffset();
+
+                    // Only add if not already in the database (lower minLen for code-segment strings)
+                    if (!stringDb.containsKey(linearAddr) && isQualityString(text, 2)) {
+                        stringDb.put(linearAddr, renderString(text));
+                        stringAddrDb.put(linearAddr, addr.toString());
+                        found++;
+                    }
+
+                    // Skip past this string to the next potential string
+                    offset += 1 + len;
+                    consecutiveMisses = 0;
+
+                } catch (MemoryAccessException e) {
+                    offset++;
+                    consecutiveMisses++;
+                } catch (AddressOutOfBoundsException e) {
+                    break;
+                }
+            }
+        }
+
+        return found;
     }
 }

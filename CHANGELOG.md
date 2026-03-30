@@ -7,22 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-04-01
+
 ### Added
+- `pascal_emit.py`: C-to-Pascal transpiler post-processor that converts decompiled C pseudocode to Pascal source; handles application function conversion (procedures/functions with proper signatures, var params, return types), Write/WriteLn sequence detection, global variable declarations from memory addresses, hex-to-decimal constant conversion, `if/else/while/repeat-until/break` control flow, `uses Crt`/`uses Dos` detection, and proper indentation
+- `pascal_emit.py`: `ExeStringReader` class reads Pascal length-prefixed strings directly from the original EXE binary at given offsets, bypassing incomplete `strings.json` entries; integrated as fallback in Write/WriteLn string resolution
+- `pascal_emit.py`: multi-strategy string resolution — inline `/* "text" */` annotations (highest priority), `bp_write_str(width, offset, segment)` argument extraction, position-based DAT_ stack frame lookup (positions [1], [2], [3] depending on frame size), direct EXE binary reading for all resolution paths
+- `pascal_emit.py`: supports three stack manipulation styles: `DAT_` named globals, `*(word *)(puVarN + -N)` casts, and `puVarN[-N]` bracket syntax (each with different string offset positions in the stack frame)
+- `tests/test_pascal_emit.py`: 180-test suite covering Pascal structure (16 programs × 8 structural checks), per-program output validation (HELLO, CONTROL, PROCFUNC, CRTTEST, MATHOPS, GAMESIM), and unit tests for expression/condition/type conversion functions
+- `Decompile.java`: Phase 2b — custom code-segment string scanner (`scanCodeSegmentStrings`) supplements Ghidra's `findPascalStrings()` which only scans data regions; reads raw bytes from initialized memory blocks looking for Pascal length-prefixed strings packed at the start of code segments; accepts strings as short as 2 characters
 - `Decompile.java`: Phase 3.2 — Library code elimination: library functions (`bp_*`, FLIRT-identified `@Name$...` and `__Name` functions) have their C bodies replaced with a `// [LIBRARY]` marker, dramatically reducing output noise; application functions retain full bodies; a summary section at the end lists all identified library functions with addresses
 - `Decompile.java`: Phase 3.4 — CONCAT11 artifact cleanup: `CONCAT11(extraout_AH..., value)` expressions simplified to just `value` (in BP7, the AH portion is irrelevant); handles nested parentheses in value arguments; complex non-extraout CONCAT11 patterns left untouched
 - `Decompile.java`: Phase 3.4 — Unused variable declaration cleanup: removes `unaff_DS` and `extraout_AH` variable declarations when the variable is not referenced elsewhere in the function body
 - `Decompile.java`: Phase 5 — `__stdcall16far` calling convention noise now also stripped from output (was missing alongside `__cdecl16near`/`__cdecl16far`)
+- `Decompile.java`: Phase 2.5 — `registerBP7Types()` registers 7 Borland Pascal standard data types in Ghidra's DataTypeManager under `/BP7` category: `TextRec`, `FileRec`, `SearchRec`, `DateTime`, `Registers`, `ShortString`, and `FileMode` enum (foundation for future parameter type application)
 - `postprocess.py`: standalone Python post-processor that applies the same text-based transformations as `Decompile.java` Phase 5; can be used to update pre-generated test outputs without re-running Ghidra
 - `tests/test_output_cleanup.py`: 8 new test classes covering library elimination (`TestLibraryElimination`: marked, no body, app functions have body, summary section, summary lists functions) and artifact cleanup (`TestArtifactCleanup`: no CONCAT11 extraout, no unused unaff_DS/extraout_AH declarations) — 128 tests across 16 binaries
-- `Decompile.java`: Phase 2.5 — `registerBP7Types()` registers 7 Borland Pascal standard data types in Ghidra's DataTypeManager under `/BP7` category: `TextRec`, `FileRec`, `SearchRec`, `DateTime`, `Registers`, `ShortString`, and `FileMode` enum (foundation for future parameter type application)
 - `tests/test_decompile_output.py`: `TestTypeCleanup` class with 3 tests — `test_no_undefined_types`, `test_no_cdecl16_calling_convention`, `test_uses_standard_type_names`
+- `debug/string_analysis.py`: diagnostic script for tracing string offset mapping
 
 ### Changed
+- `Decompile.java`: Phase 6 strings.json writer now emits from `stringDb` (HashMap) instead of `pascalStrings` (FoundString list), so custom-scanned strings are included in the output; offsets are sorted for stable output
 - `Decompile.java`, `postprocess.py`, `tests/test_output_cleanup.py`: expanded library function detection to include `ddp_*`, `crt_*`, `dos_*`, `comio_*`, `ovr_*` prefixes (previously only `bp_*`); DDTEST output reduced by ~1000 lines as DDPlus/CRT/DOS library functions are now eliminated
 - `Decompile.java`: `buildFlirtLabels()` now handles `@Name$q...` Borland mangled format (in addition to `_Name_q...`); converts `@Name$q` → `_Name_q` for lookup in `FLIRT_DESCRIPTIONS`, with generic fallback decode
 - `postprocess.py`: library summary now shows friendly names for `@Name$...` FLIRT functions (e.g., `bp_write_char (@Write$qm4Text4Char4Word)` instead of raw mangled name); includes lookup table for 28 common FLIRT names with generic fallback decode
 
 ### Fixed
+- `pascal_emit.py`: WriteLn/Write handlers no longer consume DAT_/puVar argument lines belonging to the NEXT write sequence; uses tentative-skip with rollback when `bp_iocheck` is not found after the terminator
+- `pascal_emit.py`: standalone `bp_iocheck` without preceding write parts now acts as a sequence boundary (break) instead of continuing to scan and merging with the next sequence
 - `Decompile.java`: `_Randomize_qv` FLIRT signature now maps to `bp_random` (Random(Word)) instead of `bp_randomize` — FLIRT consistently misidentifies `Random(Word)` with the `Randomize` signature because the byte patterns collide; this was causing the RANDTEST test failure and leaving `_Randomize_qv` unrenamed in GAMESIM/RANDTEST output
 - Test output files: applied `undefined1→byte`, `undefined2→word`, `undefined4→dword`, `undefined8→qword` type cleanup and calling convention removal to all 16 test output files (was defined in Decompile.java but outputs were never regenerated), fixing 31 pre-existing test failures
 
@@ -123,7 +135,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `label_functions.py`: system segment detection now uses core offset counting instead of fixed markers (`3fca`/`3f65`) for broader compatibility
 - `label_functions.py`: FLIRT description table expanded with `t1`-style mangled names (e.g., `_GotoXY_q4Bytet1`)
 
-[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v1.2.2...v2.0.0
 [1.2.2]: https://github.com/talisto/ghidra-turbo-pascal/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/talisto/ghidra-turbo-pascal/compare/v1.2.0...v1.2.1
