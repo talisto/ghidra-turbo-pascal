@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `ROADMAP.md`: Complete rewrite focused on producing compilable Pascal source files as the primary goal; reorganized into 6 phases (pascal_emit.py fixes → Ghidra output quality → language feature recovery → program structure → validation → advanced recovery); added concrete milestone targets (M1–M5) and detailed current output quality assessment against all 16 test programs
+- `pascal_emit.py` → `pascal_emit/` package: refactored 1451-line monolith into 7 focused modules (`strings`, `parser`, `types`, `expressions`, `write_sequences`, `body_converter`, `globals_scanner`, `emitter`, `pipeline`); backward-compatible `__init__.py` re-exports all public API; CLI now invoked via `python3 -m pascal_emit`
 
 ## [2.1.0] - 2026-04-01
 

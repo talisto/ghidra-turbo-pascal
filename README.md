@@ -8,7 +8,7 @@ A Ghidra-based decompilation pipeline for **DOS MZ executables compiled with Bor
 |------|-------------|
 | `decompile.sh` | Shell wrapper — the recommended entry point for the full pipeline |
 | `Decompile.java` | Ghidra headless script: decompiles, annotates strings, and labels functions |
-| `pascal_emit.py` | C-to-Pascal transpiler: converts decompiled C pseudocode to `.pas` source |
+| `pascal_emit/` | C-to-Pascal transpiler package: converts decompiled C pseudocode to `.pas` source |
 | `LoadExternalOverlay.java` | Ghidra headless script: loads Borland VROOMM `.OVR` overlay files |
 | `ApplySigHeadless.py` | PyGhidra script: applies IDA FLIRT `.sig` files to rename RTL stubs |
 | `analyze_exe.py` | Structural analyser: segment map, string table, cross-reference report |
@@ -43,7 +43,7 @@ The script runs the full pipeline:
 After decompilation, convert the C pseudocode to Pascal:
 
 ```bash
-python3 pascal_emit.py /path/to/output/decompiled.c
+python3 -m pascal_emit /path/to/output/decompiled.c
 ```
 
 This produces a `.pas` file alongside `decompiled.c` with:
@@ -127,7 +127,7 @@ If `pyghidraRun -H` fails:
 ./decompile.sh --sigs --output-file /path/to/output/decompiled-sig.c /path/to/MYPROG.EXE
 
 # Then generate Pascal source
-python3 pascal_emit.py /path/to/output/decompiled.c
+python3 -m pascal_emit /path/to/output/decompiled.c
 ```
 
 ### Using from Another Project
