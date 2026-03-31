@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `pascal_emit/expressions.py`: data segment address recognition — when a hex constant is followed by `unaff_DS` (data segment register) in function arguments, it's converted to a global variable reference (`0x75, unaff_DS` → `g_0075`) instead of a numeric literal, fixing `var` parameter compatibility
+
+### Changed
+- `tests/test_fpc_compilation.py`: GAMESIM moved from expected failures to compiling programs (11/16 now compile)
+
 ## [2.6.0] - 2026-03-30
 
 ### Fixed

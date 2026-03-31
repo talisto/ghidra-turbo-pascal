@@ -49,6 +49,7 @@ COMPILING_PROGRAMS = {
     'CRTTEST',
     'DOSTEST',
     'EXITPROC',
+    'GAMESIM',
     'HELLO',
     'MATHOPS',
     'OVRTEST',
@@ -61,7 +62,6 @@ COMPILING_PROGRAMS = {
 EXPECTED_FAILURES = {
     'DDTEST',
     'FILEIO',
-    'GAMESIM',
     'PROCFUNC',
     'PTRMEM',
     'RECORDS',

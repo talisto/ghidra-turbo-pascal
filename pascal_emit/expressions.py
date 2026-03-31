@@ -62,6 +62,14 @@ def convert_expression(expr):
     expr = re.sub(r'CONCAT11\s*\(\s*extraout_AH\s*,\s*([^)]+)\)', r'\1', expr)
     expr = re.sub(r'CONCAT22\s*\(\s*[^,]+\s*,\s*([^)]+)\)', r'\1', expr)
 
+    # Address arguments: 0xNN followed by unaff_DS means data segment address
+    # Convert to global variable reference before stripping unaff_*
+    expr = re.sub(
+        r'(0x[0-9a-f]+)\s*,\s*unaff_DS\b',
+        lambda m: f'g_{m.group(1)[2:].zfill(4).upper()}',
+        expr
+    )
+
     # Strip unaff_* arguments from call argument lists
     expr = re.sub(r',\s*unaff_\w+', '', expr)
     expr = re.sub(r'unaff_\w+\s*,\s*', '', expr)
