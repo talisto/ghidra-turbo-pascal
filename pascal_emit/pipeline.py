@@ -250,8 +250,10 @@ def _extract_params(fn):
         ptype = p.get('type', 'int')
         pname = p.get('name', 'param')
         is_ptr = '*' in ptype
-        # Clean up type: remove pointer asterisk, map Ghidra types
-        clean_type = ptype.replace(' *', '').replace('*', '').strip()
+        # Clean up type: remove pointer asterisk and pointer size suffix
+        # Ghidra emits "byte *32" meaning "pointer-to-byte (32-bit pointer)"
+        # Strip " *NN" as a unit to avoid "byte32" being misread as an array
+        clean_type = re.sub(r'\s*\*\d*', '', ptype).strip()
         # Only map small undefined types (undefined, undefined1-8) to int
         # Large ones (undefined132, undefined232) are handled by c_type_to_pascal
         if re.match(r'^undefined\d?$', clean_type):

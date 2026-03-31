@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `pascal_emit/pipeline.py`: pointer type parameters (`byte *32`, `int *32`) no longer misinterpreted as array types — pointer size suffix is now stripped separately from the base type, preventing `byte *32` → `array[0..31] of Byte` → `Pointer` cascade
+- `pascal_emit/expressions.py`: `&&` in conditions at non-zero parenthesis depth (inside C pointer casts) no longer produces `and and` — `_convert_atomic_condition` now replaces `&&`/`||` before single-char `&`/`|`, and `convert_condition` strips outer parentheses in a loop to handle nested redundant parens from Ghidra's decompiler output
+
 ## [2.5.0] - 2026-03-30
 
 ### Added

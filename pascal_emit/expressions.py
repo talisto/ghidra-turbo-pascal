@@ -199,8 +199,12 @@ def convert_condition(cond):
     """
     cond = cond.strip()
 
-    # Strip outermost matched parens for cleaner processing
-    cond = _strip_outer_parens(cond)
+    # Strip outermost matched parens repeatedly (handles ((expr)))
+    while True:
+        stripped = _strip_outer_parens(cond)
+        if stripped == cond:
+            break
+        cond = stripped
 
     # Split on || (lower precedence) at depth 0
     or_parts = _split_at_depth0(cond, '||')
@@ -272,6 +276,10 @@ def _convert_atomic_condition(cond):
     cond = re.sub(r'\s*%\s*', ' mod ', cond)
     cond = re.sub(r'\s*/\s*', ' div ', cond)
     cond = re.sub(r'(?<!\w)~(\w)', r'not \1', cond)
+    # Replace double operators before single-char versions to avoid
+    # && → "and and" (each & replaced individually)
+    cond = re.sub(r'\s*&&\s*', ' and ', cond)
+    cond = re.sub(r'\s*\|\|\s*', ' or ', cond)
     cond = re.sub(r'\s*&\s*', ' and ', cond)
     cond = re.sub(r'\s*\|\s*', ' or ', cond)
     cond = re.sub(r'\s*\^\s*', ' xor ', cond)
