@@ -239,13 +239,13 @@ class TestCrttest:
 class TestMathops:
     """MATHOPS.pas must resolve integer write values."""
 
-    def test_writeln_with_longint_placeholder(self):
-        """WriteLn with a longint value uses {longint} placeholder."""
+    def test_writeln_with_longint_value(self):
+        """WriteLn with a longint value extracts the variable reference."""
         pas = _read_pas('MATHOPS')
-        # Longint write values appear as {longint} placeholders — the write
-        # sequence detector recognises the call but can't resolve the stack-
-        # passed value to a variable name.
-        assert re.search(r"WriteLn\('.*?', \{longint\}\)", pas)
+        # Longint write values are now extracted from stack push patterns.
+        # The write sequence detector resolves the stack-passed value to a
+        # variable name (e.g., g_0056) instead of emitting {longint}.
+        assert re.search(r"WriteLn\('100 \+ 37 = ', g_0056\)", pas)
 
     def test_global_vars_declared(self):
         """Global variables used for math operands must be declared."""
@@ -346,6 +346,135 @@ class TestCTypeToPascal:
 
     def test_byte(self):
         assert pascal_emit.c_type_to_pascal('byte') == 'Byte'
+
+
+class TestOperatorConversion:
+    """Test arithmetic and bitwise operator conversion."""
+
+    def test_modulo_to_mod(self):
+        assert 'mod' in pascal_emit.convert_expression('a % b')
+        assert '%' not in pascal_emit.convert_expression('a % b')
+
+    def test_division_to_div(self):
+        result = pascal_emit.convert_expression('a / b')
+        assert ' div ' in result
+
+    def test_bitwise_and(self):
+        result = pascal_emit.convert_expression('a & b')
+        assert ' and ' in result
+
+    def test_bitwise_or(self):
+        result = pascal_emit.convert_expression('a | b')
+        assert ' or ' in result
+
+    def test_bitwise_xor(self):
+        result = pascal_emit.convert_expression('a ^ b')
+        assert ' xor ' in result
+
+    def test_bitwise_not(self):
+        result = pascal_emit.convert_expression('~a')
+        assert result.startswith('not ')
+
+    def test_shl(self):
+        result = pascal_emit.convert_expression('x << 4')
+        assert 'shl' in result
+
+    def test_shr(self):
+        result = pascal_emit.convert_expression('x >> 4')
+        assert 'shr' in result
+
+    def test_control_uses_mod(self):
+        """CONTROL.pas FizzBuzz logic uses mod not %."""
+        pas = _read_pas('CONTROL')
+        assert 'mod 3' in pas
+        assert 'mod 5' in pas
+        assert '%' not in pas
+
+    def test_mathops_uses_div(self):
+        """MATHOPS.pas uses div for integer division."""
+        pas = _read_pas('MATHOPS')
+        assert 'div g_0054' in pas
+
+
+class TestCastConversion:
+    """Test C-style cast to Pascal type cast conversion."""
+
+    def test_ulong_cast(self):
+        result = pascal_emit.convert_expression('(ulong)x')
+        assert result == 'LongInt(x)'
+
+    def test_uint_cast(self):
+        result = pascal_emit.convert_expression('(uint)x')
+        assert result == 'Word(x)'
+
+    def test_int_cast(self):
+        result = pascal_emit.convert_expression('(int)x')
+        assert result == 'Integer(x)'
+
+    def test_byte_cast(self):
+        result = pascal_emit.convert_expression('(byte)x')
+        assert result == 'Byte(x)'
+
+    def test_cast_with_paren_expr(self):
+        result = pascal_emit.convert_expression('(ulong)(a + b)')
+        assert result.startswith('LongInt(')
+
+    def test_procfunc_longint_cast(self):
+        """PROCFUNC Square function uses LongInt(param) not (ulong)param."""
+        pas = _read_pas('PROCFUNC')
+        assert 'LongInt(param_1) * LongInt(param_1)' in pas
+
+
+class TestLongintWrite:
+    """Test longint write value extraction."""
+
+    def test_mathops_no_longint_placeholder(self):
+        """MATHOPS should have no {longint} placeholders."""
+        pas = _read_pas('MATHOPS')
+        assert '{longint}' not in pas
+
+    def test_control_no_longint_placeholder(self):
+        """CONTROL should have no {longint} placeholders."""
+        pas = _read_pas('CONTROL')
+        assert '{longint}' not in pas
+
+    def test_control_sum_writeln(self):
+        """Sum 1..10 WriteLn shows variable not placeholder."""
+        pas = _read_pas('CONTROL')
+        assert "WriteLn('Sum 1..10 = ', g_0056)" in pas
+
+    def test_control_mult_table_width(self):
+        """Multiplication table Write has :4 width specifier."""
+        pas = _read_pas('CONTROL')
+        assert re.search(r'Write\(g_0052 \* g_0054:4\)', pas)
+
+    def test_procfunc_param_write(self):
+        """PROCFUNC WriteLn('Value: ', param_1) shows parameter."""
+        pas = _read_pas('PROCFUNC')
+        assert "WriteLn('Value: ', param_1)" in pas
+
+
+class TestTempVarDeclarations:
+    """Test that undeclared temp variables get var declarations."""
+
+    def test_control_ivar_declared(self):
+        """CONTROL.pas declares iVar1 in var section."""
+        pas = _read_pas('CONTROL')
+        assert 'iVar1: Integer;' in pas
+
+    def test_mathops_temp_vars_declared(self):
+        """MATHOPS temp variables are declared."""
+        pas = _read_pas('MATHOPS')
+        # All iVar/uVar references should have declarations
+        for m in re.finditer(r'\b([iu]Var\d+)\b', pas):
+            var_name = m.group(1)
+            assert f'{var_name}:' in pas, f'{var_name} used but not declared'
+
+    def test_procfunc_function_locals(self):
+        """PROCFUNC function local temp vars are declared."""
+        pas = _read_pas('PROCFUNC')
+        # uVar1 is used in Func_1000_0079
+        assert 'uVar1: Word;' in pas
 
 
 # ────────────────────────────────────────────────────────────────

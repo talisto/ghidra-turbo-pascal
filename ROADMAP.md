@@ -25,8 +25,8 @@ The transpiler (`pascal_emit.py`) can emit `.pas` files, but they are **not comp
 | Trivial programs (WriteLn only) | ✅ Works | HELLO.pas compiles and runs |
 | Global variables | 🟡 Partial | Named as `g_0052` — correct type, wrong name |
 | WriteLn/Write sequences | 🟡 Partial | Most detected; some emit `{int}` or `{???}` placeholders |
-| Arithmetic operators | ❌ Broken | `div` → `/`, `mod` → `%` (C syntax, not Pascal) |
-| Bitwise/logical operators | ❌ Broken | `and`/`or`/`xor`/`not`/`shl`/`shr` not converted |
+| Arithmetic operators | ✅ Fixed | `div`, `mod`, `and`, `or`, `xor`, `not`, `shl`, `shr` |
+| Bitwise/logical operators | ✅ Fixed | `and`/`or`/`xor`/`not`/`shl`/`shr` converted |
 | For loops | ❌ Not implemented | Emitted as `{ for loop: ... }` comments |
 | Case statements | ❌ Not implemented | Emitted as if/else chains with inverted logic |
 | String operations | ❌ Non-functional | String type lost; Concat/Copy/Pos/Length/Delete/Insert are raw calls |
@@ -34,9 +34,10 @@ The transpiler (`pascal_emit.py`) can emit `.pas` files, but they are **not comp
 | Nested procedures | ❌ Not recovered | Flattened to separate procedures with frame pointer params |
 | File I/O | ❌ Non-functional | Assign/Reset/Rewrite/ReadLn are unresolved FUN_xxxx calls |
 | Function return values | ❌ Broken | C `return` not always converted to `FuncName := value` |
-| Type casts | ❌ Pass-through | C casts like `(ulong)`, `(uint)` appear verbatim |
+| Type casts | ✅ Fixed | `(ulong)x` → `LongInt(x)`, `(uint)x` → `Word(x)`, etc. |
 | 32-bit arithmetic | ❌ Broken | LongInt operations decomposed to 16-bit carry pairs |
-| Undeclared variables | ❌ Broken | `iVar1`, `uVar5`, `pbVar1` used but not declared |
+| Undeclared variables | ✅ Fixed | `iVar1`, `uVar5` auto-declared with inferred types |
+| WriteLn longint values | ✅ Fixed | Values extracted from stack push patterns, no more `{longint}` |
 | Array types | ❌ Not recovered | Array access as pointer arithmetic |
 
 ---
@@ -47,22 +48,22 @@ The transpiler (`pascal_emit.py`) can emit `.pas` files, but they are **not comp
 
 These are pure Python fixes in `pascal_emit.py` that don't require any Ghidra changes. They address syntax errors and missing Pascal constructs.
 
-### 1.1 Fix Arithmetic and Bitwise Operators
+### 1.1 Fix Arithmetic and Bitwise Operators ✅
 
-The expression converter (`convert_expression()`) currently emits C operators. Fix:
+**Status**: Complete — `convert_expression()` and `convert_condition()` now convert all C operators to Pascal equivalents.
 
-| C Pattern | Current Output | Correct Pascal |
-|-----------|---------------|----------------|
-| `a / b` (integer context) | `a / b` | `a div b` |
-| `a % b` | `a % b` | `a mod b` |
-| `a & b` | `a & b` | `a and b` |
-| `a \| b` | `a \| b` | `a or b` |
-| `a ^ b` | `a ^ b` | `a xor b` |
-| `~a` | `~a` | `not a` |
-| `a << n` | ✅ `a * 2^n` | `a shl n` (use native) |
-| `a >> n` | ✅ `a div 2^n` | `a shr n` (use native) |
-| `(ulong)x` | `(ulong)x` | `LongInt(x)` |
-| `(uint)x` | `(uint)x` | `Word(x)` |
+| C Pattern | Output |
+|-----------|--------|
+| `a / b` (integer context) | `a div b` |
+| `a % b` | `a mod b` |
+| `a & b` | `a and b` |
+| `a \| b` | `a or b` |
+| `a ^ b` | `a xor b` |
+| `~a` | `not a` |
+| `a << n` | `a shl n` |
+| `a >> n` | `a shr n` |
+| `(ulong)x` | `LongInt(x)` |
+| `(uint)x` | `Word(x)` |
 
 ### 1.2 Implement For Loop Conversion
 
@@ -79,11 +80,9 @@ Ghidra decompiles `case i of` as nested `if/else if` chains. The transpiler emit
 
 **Approach:** Pattern-match chains of `if iVar = CONST then begin ... end else if iVar = CONST2 then begin ...` into `case iVar of CONST: ...; CONST2: ...;`. Also detect range patterns (`(iVar < 3) or (5 < iVar)` → complement of `3..5`).
 
-### 1.4 Fix Variable Declarations
+### 1.4 Fix Variable Declarations ✅
 
-Currently, intermediate variables (`iVar1`, `uVar5`, etc.) are used in the output but never declared. Two approaches:
-- **Collect and declare**: scan the function body for used temp variables and emit `var` blocks
-- **Inline where possible**: replace single-use temps with their source expression
+**Status**: Complete — Ghidra temp variables (`iVar`, `uVar`, `cVar`, `bVar`) are now auto-detected in function bodies and emitted as `var` declarations with inferred Pascal types. For the main block, they're added to the global `var` section.
 
 ### 1.5 Fix Function Return Value Assignment
 
@@ -92,12 +91,9 @@ C `return expr;` must become `FuncName := expr;` in Pascal. The current code han
 - Functions where the return type detection fails
 - Multiple return paths
 
-### 1.6 Remove C Cast Syntax
+### 1.6 Remove C Cast Syntax ✅
 
-Strip or convert remaining C-style casts that pass through:
-- `(int)`, `(uint)`, `(ulong)`, `(byte)`, `(char)` → Pascal type casts or removal
-- `CONCAT11()`, `CONCAT22()` → extract the meaningful value
-- `(uint)(ushort)` chains → simplify to single cast
+**Status**: Complete — C-style casts now convert to Pascal function-call syntax: `(ulong)x` → `LongInt(x)`, `(uint)x` → `Word(x)`, etc. CONCAT11/CONCAT22 patterns are also handled.
 
 ---
 

@@ -13,7 +13,7 @@ WRITE_STR_ARGS_RE = re.compile(
     r'(?:bp_write_str|FUN_\w+_0670)\s*\(\s*\d+\s*,\s*(0x[0-9a-f]+|\d+)\s*,\s*0x[0-9a-f]+\s*\)'
 )
 WRITE_INT_RE = re.compile(
-    r'(?:bp_write_int|bp_write7Longint4Word|_Write_qm4Text7Longint4Word)\s*\('
+    r'(?:bp_write_int)\s*\('
 )
 WRITE_LONGINT_RE = re.compile(
     r'(?:bp_write_longint|bp_write7Longint4Word|_Write_qm4Text7Longint4Word)\s*\('
@@ -31,6 +31,12 @@ WRITE_INT_ARGS_RE = re.compile(
 )
 WRITE_INT_ARGS_SIMPLE_RE = re.compile(
     r'bp_write_int\s*\(\s*(\d+)\s*,\s*(.+?)\s*,'
+)
+# Extract args from explicit-argument longint write calls:
+# _Write_qm4Text7Longint4Word(width, value, value >> 0xf)
+WRITE_LONGINT_ARGS_RE = re.compile(
+    r'(?:bp_write_longint|bp_write7Longint4Word|_Write_qm4Text7Longint4Word)'
+    r'\s*\(\s*(\d+)\s*,\s*(.+?)\s*,\s*.+?>>\s*(?:0xf|15)\s*\)'
 )
 
 DAT_VALUE_RE = re.compile(r'DAT_\w+ = (\*\(int \*\)0x[0-9a-f]+)')
@@ -175,7 +181,28 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
             # Longint write
             if WRITE_LONGINT_RE.search(jline):
                 found_write = True
-                parts.append('{longint}')
+                # Try explicit args first: func(width, value, sign_ext)
+                m_args = WRITE_LONGINT_ARGS_RE.search(jline)
+                if m_args:
+                    val_width = int(m_args.group(1))
+                    val_expr = m_args.group(2).strip()
+                    converted = convert_expression(val_expr)
+                    if val_width > 0:
+                        parts.append(f'{converted}:{val_width}')
+                    else:
+                        parts.append(converted)
+                else:
+                    # Try DAT_/puVar push pattern
+                    val_expr, val_width = _extract_longint_value(dat_values)
+                    if val_expr:
+                        converted = convert_expression(val_expr)
+                        if val_width > 0:
+                            parts.append(f'{converted}:{val_width}')
+                        else:
+                            parts.append(converted)
+                    else:
+                        parts.append('{longint}')
+                dat_values.clear()
                 j += 1
                 continue
 
@@ -305,6 +332,50 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
             i = j if sequences and sequences[-1][1] == j else i + 1
 
     return sequences
+
+
+def _extract_longint_value(dat_values):
+    """Extract the value expression for a longint write from stacked arguments.
+
+    The longint write push pattern (DAT_ or puVar) produces these dat_values:
+      [0] = value expression (the longint low word or full expression)
+      [1] = sign extension (value >> 0xf, skip)
+      [2] = width (small constant)
+      [3] = segment (large constant, skip)
+      [4] = offset (skip)
+
+    Returns (value_expr, width) or (None, 0).
+    """
+    value = None
+    width = 0
+    width_candidates = []
+
+    for val in dat_values:
+        stripped = val.strip()
+        # Skip sign extension patterns
+        if re.search(r'>>\s*(?:0xf|15)\b', stripped):
+            continue
+        if re.search(r'\bshr\s+(?:0xf|15)\b', stripped):
+            continue
+        # Check if this is a pure constant
+        const_match = re.match(r'^(0x[0-9a-f]+|\d+)$', stripped)
+        if const_match:
+            int_val = int(stripped, 16) if stripped.startswith('0x') else int(stripped)
+            # Large constants are likely segment values, skip
+            if int_val > 255:
+                continue
+            # Small constants could be width
+            width_candidates.append(int_val)
+            continue
+        # This is a variable reference or expression — likely the value
+        if value is None:
+            value = stripped
+
+    # The first small constant is typically the width
+    if width_candidates:
+        width = width_candidates[0]
+
+    return value, width
 
 
 def _find_dat_value(lines, write_int_idx):

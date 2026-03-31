@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-03-30
+
+### Fixed
+- `pascal_emit/expressions.py`: `%` now converts to `mod`, `/` to `div`, `&` to `and`, `|` to `or`, `^` to `xor`, `~` to `not`, `<<` to `shl`, `>>` to `shr` — previously emitted C operators verbatim
+- `pascal_emit/expressions.py`: C-style casts `(ulong)x` now convert to Pascal function-call syntax `LongInt(x)` instead of concatenating `LongIntx`; handles `(uint)`, `(int)`, `(byte)`, `(char)`, `(word)`, `(dword)`, `(ushort)`
+- `pascal_emit/write_sequences.py`: longint Write/WriteLn values now extract the actual variable expression from stack push patterns (DAT_ and puVar) and explicit function arguments, replacing `{longint}` placeholders with real values like `g_0056` or `param_1`
+- `pascal_emit/write_sequences.py`: separated `WRITE_INT_RE` from `WRITE_LONGINT_RE` — previously both matched `_Write_qm4Text7Longint4Word`, causing the int handler to intercept longint calls
+
+### Added
+- `pascal_emit/pipeline.py`: undeclared Ghidra temp variables (`iVar`, `uVar`, `cVar`, `bVar`) are now automatically detected in function bodies and emitted as `var` declarations with inferred Pascal types (Integer, Word, Char, Byte)
+- `pascal_emit/emitter.py`: main block temp variable declarations emitted in the global `var` section alongside memory-mapped globals
+- `pascal_emit/write_sequences.py`: `_extract_longint_value()` helper and `WRITE_LONGINT_ARGS_RE` regex for extracting longint values from both DAT_-push and explicit-argument patterns, with width specifier support
+- `tests/test_pascal_emit.py`: 24 new tests — `TestOperatorConversion` (11), `TestCastConversion` (6), `TestLongintWrite` (5), `TestTempVarDeclarations` (3)
+
 ### Removed
 - `pascal_emit/parser.py`: deleted — legacy regex-based `decompiled.c` parser (`parse_functions`, `classify_function`, `find_primary_segment`, `parse_c_signature`) is no longer needed now that `functions.json` is the sole data source
 - `pascal_emit/globals_scanner.py`: deleted — legacy global variable/uses-clause detection via regex scanning of parsed function bodies; equivalent functionality is inlined in `pipeline.py` for the IR path
@@ -164,7 +178,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `label_functions.py`: system segment detection now uses core offset counting instead of fixed markers (`3fca`/`3f65`) for broader compatibility
 - `label_functions.py`: FLIRT description table expanded with `t1`-style mangled names (e.g., `_GotoXY_q4Bytet1`)
 
-[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v1.2.2...v2.0.0
 [1.2.2]: https://github.com/talisto/ghidra-turbo-pascal/compare/v1.2.1...v1.2.2

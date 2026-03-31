@@ -159,6 +159,35 @@ def _find_primary_segment(ir_functions):
     return '1000'
 
 
+# Pattern for Ghidra temp variable references: iVar1, uVar5, cVar3, bVar2, etc.
+_TEMP_VAR_RE = re.compile(r'\b([iucb]Var\d+)\b')
+
+# Map Ghidra temp variable prefix to Pascal type
+_TEMP_VAR_TYPES = {
+    'i': 'Integer',
+    'u': 'Word',
+    'c': 'Char',
+    'b': 'Byte',
+}
+
+
+def _collect_undeclared_temps(body_text):
+    """Scan a converted body for temp variable references and return declarations.
+
+    Returns list of (name, type) tuples for variables like iVar1, uVar5, etc.
+    """
+    found = set()
+    for m in _TEMP_VAR_RE.finditer(body_text):
+        found.add(m.group(1))
+
+    result = []
+    for name in sorted(found):
+        prefix = name[0]
+        ptype = _TEMP_VAR_TYPES.get(prefix, 'Integer')
+        result.append((name, ptype))
+    return result
+
+
 def _detect_globals(bodies):
     """Scan function bodies for global memory accesses.
 
@@ -334,9 +363,18 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
             else:
                 clean_body_lines.append(bline)
 
+        clean_body = '\n'.join(clean_body_lines)
+
+        # Collect undeclared temp variables from the body
+        declared_names = {v[0] for v in local_vars}
+        declared_names.update(p[1] for p in params)  # parameter names
+        for temp_name, temp_type in _collect_undeclared_temps(clean_body):
+            if temp_name not in declared_names:
+                local_vars.append((temp_name, temp_type))
+
         pascal_funcs.append({
             'declaration': declaration,
-            'body': '\n'.join(clean_body_lines),
+            'body': clean_body,
             'is_function': is_function,
             'pascal_name': pascal_name,
             'local_vars': local_vars,
@@ -358,8 +396,17 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
         }
         main_body = convert_function_body(body_text, strings_db, func_info, exe_reader)
 
+    # Collect undeclared temp vars from main body and add to globals
+    main_temps = []
+    if main_body:
+        global_names = {f'g_{off[2:].zfill(4).upper()}' for off in globals_map}
+        for temp_name, temp_type in _collect_undeclared_temps(main_body):
+            if temp_name not in global_names:
+                main_temps.append((temp_name, temp_type))
+
     # Emit
-    pascal_text = emit_pascal(program_name, uses, globals_map, pascal_funcs, main_body)
+    pascal_text = emit_pascal(program_name, uses, globals_map, pascal_funcs,
+                              main_body, main_temps)
 
     # Determine output path
     if not output_path:
