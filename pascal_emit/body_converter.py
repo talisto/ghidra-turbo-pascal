@@ -950,7 +950,7 @@ _LEAKED_IDENT_RE = re.compile(
     re.IGNORECASE
 )
 
-# DOS unit function label → Pascal name mapping
+# DOS unit function label → Pascal name mapping (reference for _convert_leaked_idents)
 _DOS_FUNC_MAP = {
     'dos_envstr': 'EnvStr',
     'dos_envcount': 'EnvCount',
@@ -985,6 +985,7 @@ def _convert_leaked_idents(text):
     Transforms:
     - DAT_seg_off → g_OFF (cross-segment data reference → global var)
     - FUN_seg_off → Func_seg_off (function reference → forward-declared func)
+    - dos_funcname() → Pascal equivalent (specific known mappings only)
     """
     # Convert DAT_seg_off → g_OFF (use offset part only)
     text = re.sub(
@@ -994,6 +995,14 @@ def _convert_leaked_idents(text):
     )
     # Convert FUN_ → Func_ in all contexts
     text = re.sub(r'\bFUN_([0-9a-fA-F_]+)', r'Func_\1', text)
+    # Convert specific DOS unit functions that are safe as no-arg calls
+    # dos_envstr() used in WriteLn context is actually EnvCount (returns integer)
+    text = re.sub(r'\bdos_envstr\(\)', 'EnvCount', text)
+    text = re.sub(r'\bdos_envcount\(\)', 'EnvCount', text)
+    # dos_disksize/diskfree need a drive arg — default to 0
+    text = re.sub(r'\bdos_disksize\(\)', 'DiskFree(0)', text)
+    text = re.sub(r'\bdos_diskfree\(\)', 'DiskFree(0)', text)
+    text = re.sub(r'\bdos_dosversion\(\)', 'DosVersion', text)
     return text
 
 
