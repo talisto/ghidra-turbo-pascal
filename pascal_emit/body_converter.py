@@ -691,12 +691,23 @@ def _sanitize_ghidra_artifacts(lines):
         if stripped in ('begin', 'end;', 'end.', 'repeat', '') or stripped.startswith('end '):
             result.append(line)
             continue
+        # For Write/WriteLn lines, convert FUN_ calls to Func_ before
+        # checking for leaked identifiers — these are function calls
+        # that should match their Pascal declarations
+        check_text = stripped
+        if re.match(r'Write(?:Ln)?\s*\(', stripped) and 'FUN_' in stripped:
+            check_text = re.sub(r'\bFUN_([0-9a-fA-F_]+)', r'Func_\1', stripped)
         # Check for leaked identifiers
-        if _LEAKED_IDENT_RE.search(stripped):
+        if _LEAKED_IDENT_RE.search(check_text):
             indent = line[:len(line) - len(line.lstrip())]
             result.append(f'{indent}{{ {stripped} }}')
         else:
-            result.append(line)
+            if check_text != stripped:
+                # FUN_ was converted to Func_ — use the converted version
+                indent = line[:len(line) - len(line.lstrip())]
+                result.append(f'{indent}{check_text}')
+            else:
+                result.append(line)
 
     # Second pass: comment out orphaned end; keywords whose matching begin
     # was commented out.  Track depth from lines that are NOT comments.
@@ -931,8 +942,11 @@ def convert_c_line(line, func_info):
     if line == 'continue;':
         return f'{indent}Continue;'
 
-    # Assignment with memory access
-    assign_match = re.match(r'^(\*\((?:int|uint|word|byte|char) \*\)0x[0-9a-f]+)\s*=\s*(.+?)\s*;$', line)
+    # Assignment with memory access (global address or field offset)
+    # Matches: *(type *)0xNN = value;  AND  *(type *)(var + offset) = value;
+    _MEM_LHS = (r'(\*\((?:int|uint|word|byte|char) \*\)'
+                r'(?:0x[0-9a-f]+|\(\w+ \+ -?(?:0x[0-9a-f]+|\d+)\)))')
+    assign_match = re.match(_MEM_LHS + r'\s*=\s*(.+?)\s*;$', line)
     if assign_match:
         lhs = convert_expression(assign_match.group(1))
         rhs = convert_expression(assign_match.group(2))
@@ -954,10 +968,9 @@ def convert_c_line(line, func_info):
             return None
         return f'{indent}{lhs} := {rhs};'
 
-    # Compound assignment
+    # Compound assignment (global address or field offset)
     compound_match = re.match(
-        r'^(\*\((?:int|uint|word|byte|char) \*\)0x[0-9a-f]+)\s*'
-        r'([\+\-\*])=\s*(.+?)\s*;$', line)
+        _MEM_LHS + r'\s*([\+\-\*])=\s*(.+?)\s*;$', line)
     if compound_match:
         lhs = convert_expression(compound_match.group(1))
         op = compound_match.group(2)

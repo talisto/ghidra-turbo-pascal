@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-03-31
+
+### Added
+- `pascal_emit/body_converter.py`: widened assignment LHS regex to match field-access patterns `*(type *)(var + offset) = value;` in addition to existing `*(type *)0xNN = value;` — shared `_MEM_LHS` pattern covers both forms for simple and compound assignments
+- `pascal_emit/body_converter.py`: FUN_→Func_ conversion in `_sanitize_ghidra_artifacts` for Write/WriteLn lines — cross-segment function references (e.g., `FUN_1066_02e7`) become `Func_1066_02e7()` calls within Write statements
+- `pascal_emit/pipeline.py`: Func_ stub generation — undeclared `Func_XXXX_XXXX` references get `function FuncName: Integer; forward;` stubs, enabling cross-segment function calls in Write/WriteLn
+- `pascal_emit/pipeline.py`: `_comment_out_bad_func_calls` safety check — re-comments Write/WriteLn lines where Func_ is called with no arguments but the function's IR declaration has parameters, preventing FPC "Can't read or write variables of this type" errors
+
+### Changed
+- RECORDS: 27 → 16 commented lines (-11) from field-access assignment expansion
+- PTRMEM: 17 → 15 commented lines (-2); `WriteLn('MemAvail: ', Func_1066_02e7())` and `WriteLn('MaxAvail: ', Func_1066_0303())` now emit as active code with Func_ stubs
+- Compilation: 15/16 programs unchanged (93.75%), no regressions
+
 ## [2.17.0] - 2026-03-31
 
 ### Added

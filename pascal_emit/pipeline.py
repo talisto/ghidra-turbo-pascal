@@ -233,6 +233,38 @@ def _comment_out_unsafe_lines(body, array_vars=None, param_names=None):
     return '\n'.join(result)
 
 
+_FUNC_CALL_IN_WRITE_RE = re.compile(r'\b(Func_[0-9a-fA-F_]+)\s*\(\s*\)')
+
+
+def _comment_out_bad_func_calls(body, proc_param_info):
+    """Comment out Write/WriteLn lines that call Func_ with wrong arg count.
+
+    When _sanitize_ghidra_artifacts converts FUN_ to Func_ inside Write
+    statements, the calls have no arguments. If the target function is
+    declared with parameters, the call would fail at compilation.
+    """
+    if not proc_param_info:
+        return body
+    lines = body.split('\n')
+    result = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('{') and stripped.endswith('}'):
+            result.append(line)
+            continue
+        m = _FUNC_CALL_IN_WRITE_RE.search(stripped)
+        if m:
+            func_name = m.group(1)
+            if func_name in proc_param_info:
+                count, _ = proc_param_info[func_name]
+                if count > 0:
+                    indent = line[:len(line) - len(line.lstrip())]
+                    result.append(f'{indent}{{ {stripped} }}')
+                    continue
+        result.append(line)
+    return '\n'.join(result)
+
+
 def _collect_undeclared_temps(body_text):
     """Scan a converted body for temp variable references and return declarations.
 
@@ -596,6 +628,24 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
         })
     pascal_funcs = stub_funcs + pascal_funcs
 
+    # Generate stubs for cross-segment Func_ references (functions used
+    # in Write/WriteLn arguments that aren't declared in the program)
+    func_refs = set(re.findall(r'\bFunc_[0-9a-fA-F]+_[0-9a-fA-F]+\b',
+                               all_pascal_text))
+    declared_funcs = {f['pascal_name'] for f in pascal_funcs}
+    undeclared_funcs = sorted(func_refs - declared_funcs)
+    func_stubs = []
+    for fname in undeclared_funcs:
+        decl = f'function {fname}: Integer;'
+        func_stubs.append({
+            'declaration': decl,
+            'body': '  { cross-segment stub }',
+            'is_function': True,
+            'pascal_name': fname,
+            'local_vars': [],
+        })
+    pascal_funcs = func_stubs + pascal_funcs
+
     # Build map of procedure names to required param counts for fixing
     # empty calls (Ghidra emits FUN_xxxx() with no args when it can't
     # resolve BP7 stack-based argument passing)
@@ -624,6 +674,12 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
                       if typ.startswith('array[')}
         func['body'] = _comment_out_unsafe_lines(func['body'], array_vars)
     main_body = _comment_out_unsafe_lines(main_body)
+
+    # Comment out Write/WriteLn lines that call Func_ with wrong arg count
+    main_body = _comment_out_bad_func_calls(main_body, proc_param_info)
+    for func in pascal_funcs:
+        func['body'] = _comment_out_bad_func_calls(
+            func['body'], proc_param_info)
 
     # Emit
     pascal_text = emit_pascal(program_name, uses, referenced_globals, pascal_funcs,
