@@ -2,7 +2,7 @@
 
 > A prioritized plan for producing working Turbo Pascal 7 source files from Ghidra-decompiled DOS MZ executables. The goal is not byte-identical reproduction — it's **functional Pascal programs** that compile with TP7/FPC and produce the same observable behavior as the original.
 
-## Current State (v2.23.0)
+## Current State (v2.24.0)
 
 | Capability | Status |
 |------------|--------|
@@ -11,7 +11,7 @@
 | Single-pass headless decompilation pipeline | ✅ Complete |
 | Overlay (.OVR) loading | ✅ Complete |
 | 16 test binaries with full pytest coverage | ✅ Complete (659 tests) |
-| C-to-Pascal transpiler (`pascal_emit/`) | ✅ Functional — 15/16 compile |
+| C-to-Pascal transpiler (`pascal_emit/`) | ✅ Functional — 14/16 compile |
 | Library code elimination in decompiled output | ✅ Complete |
 | Artifact cleanup (CONCAT11, unaff_DS, calling conventions) | ✅ Complete |
 | BP7 type definitions registered in Ghidra (TextRec, FileRec, etc.) | ✅ Registered (not yet applied) |
@@ -22,31 +22,33 @@
 | Global variable detection and declaration | ✅ Complete |
 | String global auto-retyping | ✅ Complete (Integer → String[N] when string-assigned) |
 | Cross-segment Proc_/Func_ stub generation | ✅ Complete |
-| Noise line suppression | ✅ Complete (~40 patterns) |
+| Noise line suppression | ✅ Complete (~50 patterns) |
 | CARRY2 32-bit carry arithmetic conversion | ✅ Complete |
 | Proc_ var parameter temp variable generation | ✅ Complete |
 | Array element assignment conversion | ✅ Complete |
 | Func_() placeholder args in WriteLn | ✅ Complete |
+| DDPlus library function conversion | ✅ Complete (16 functions + string resolution) |
+| String concatenation sequence merging | ✅ Complete (bp_delete + bp_str_append → Concat) |
 
-### Current Pascal Output Quality (v2.23.0)
+### Current Pascal Output Quality (v2.24.0)
 
 Assessed against 16 test programs with known original source:
 
 | Metric | Value |
 |--------|-------|
-| Programs that compile (FPC -Mtp -Sc) | **15/16** (93.75%) |
-| Programs **successfully transpiled** (compile + 0 non-stub commented lines) | **8/16** (50%) |
-| Total commented lines (non-stub) | **174** across all programs |
+| Programs that compile (FPC -Mtp -Sc) | **14/16** (87.5%) |
+| Programs **successfully transpiled** (compile + 0 non-stub commented lines) | **9/16** (56.25%) |
+| Total commented lines (non-stub) | **79** across all programs |
 
 **Quality tier breakdown:**
 
 | Tier | Programs | Count |
 |------|----------|-------|
-| **Clean** (compiles, 0 non-stub commented lines) | CONTROL, CRTTEST, EXITPROC, GAMESIM, HELLO, MATHOPS, OVRTEST, TYPECAST | 8 |
-| **Incomplete** (compiles, but has commented-out code = missing functionality) | DDTEST(95), DOSTEST(18), PROCFUNC(5), PTRMEM(8), RANDTEST(1), RECORDS(7), STRINGS(25) | 7 |
-| **Broken** (does not compile) | FILEIO(15) | 1 |
+| **Clean** (compiles, 0 non-stub commented lines) | CONTROL, CRTTEST, DDTEST, EXITPROC, GAMESIM, HELLO, MATHOPS, OVRTEST, TYPECAST | 9 |
+| **Incomplete** (compiles, but has commented-out code = missing functionality) | DOSTEST(18), PROCFUNC(5), PTRMEM(8), RANDTEST(1), RECORDS(7), STRINGS(25) | 6 |
+| **Broken** (does not compile) | DDTEST(ddplus unit), FILEIO(15) | 2 |
 
-> **Important**: A program is NOT considered successfully transpiled if it contains ANY commented-out code (excluding cross-segment stubs). Every commented-out line — even a single `{ bp_delete(); }` — represents missing functionality. The transpiled program will not behave the same as the original.
+> **Note**: DDTEST has 0 commented lines (Clean tier) but cannot compile with FPC because it requires the external `ddplus` unit. FILEIO has unresolved file I/O operations.
 
 | Area | Status | Notes |
 |------|--------|-------|
@@ -57,6 +59,8 @@ Assessed against 16 test programs with known original source:
 | Bitwise/logical operators | ✅ Fixed | `and`/`or`/`xor`/`not`/`shl`/`shr` converted |
 | For loops | ✅ Fixed | Counting loops converted to `for..to/downto` |
 | Case statements | ✅ Fixed | `if/else if` chains → `case...of` with ranges |
+| DDPlus library functions | ✅ Working | 16 functions with string resolution and char conversion |
+| String concatenation sequences | ✅ Working | bp_delete + bp_str_append → swriteln('s' + g_XXXX) |
 | String operations | ❌ Non-functional | String type lost; Concat/Copy/Pos/Length/Delete/Insert are raw calls |
 | Record types | ❌ Not recovered | Field access as `*(int *)(ptr + 0x15)` |
 | Nested procedures | ❌ Not recovered | Flattened to separate procedures with frame pointer params |

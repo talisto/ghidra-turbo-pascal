@@ -109,7 +109,12 @@ def _postprocess_ccode(ccode, renames, strings_db):
     text = text.replace('__stdcall16far ', '')
 
     # 4. CONCAT11 cleanup: CONCAT11(extraout_AH, value) → value
-    text = re.sub(r'CONCAT11\s*\(\s*extraout_AH\s*,\s*([^)]+)\)', r'\1', text)
+    # Also handle numbered variants: extraout_AH_00, extraout_AH_01, etc.
+    text = re.sub(r'CONCAT11\s*\(\s*extraout_AH(?:_\d+)?\s*,\s*([^)]+)\)', r'\1', text)
+
+    # 4b. Clean up extraout_AH artifacts in shift expressions:
+    # (uint)extraout_AH_XX << 8 → 0 (high byte from CONCAT11 is always 0)
+    text = re.sub(r'\(uint\)\s*extraout_AH(?:_\d+)?\s*<<\s*\d+', '0', text)
 
     # 5. String annotations — add /* "..." */ comments for known offsets
     if strings_db:
@@ -378,6 +383,8 @@ def _detect_uses(ir_functions):
         uses.add('Crt')
     if re.search(r'\bdos_intr\b|GetDate|GetTime|FindFirst|DiskSize|SetIntVec|FSplit|GetEnv|Intr', label_text):
         uses.add('Dos')
+    if re.search(r'\bddp_', label_text):
+        uses.add('ddplus')
 
     return sorted(uses)
 
@@ -500,6 +507,7 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
             'params': params,
             'ir': fn,
             'strings_db': strings_db,
+            'exe_reader': exe_reader,
         }
 
         body = convert_function_body(body_text, strings_db, func_info, exe_reader)
@@ -545,6 +553,7 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
             'params': [],
             'ir': entry_fn,
             'strings_db': strings_db,
+            'exe_reader': exe_reader,
         }
         main_body = convert_function_body(body_text, strings_db, func_info, exe_reader)
 

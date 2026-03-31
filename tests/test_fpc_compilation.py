@@ -52,7 +52,6 @@ def get_all_pas_programs():
 COMPILING_PROGRAMS = {
     'CONTROL',
     'CRTTEST',
-    'DDTEST',
     'DOSTEST',
     'EXITPROC',
     'GAMESIM',
@@ -69,6 +68,7 @@ COMPILING_PROGRAMS = {
 
 # Programs that are expected to fail (not yet fixed)
 EXPECTED_FAILURES = {
+    'DDTEST',   # needs external ddplus unit (not available in FPC)
     'FILEIO',
 }
 
@@ -153,6 +153,7 @@ def _count_commented_lines(pas_path):
 CLEAN_PROGRAMS = {
     'CONTROL',
     'CRTTEST',
+    'DDTEST',
     'EXITPROC',
     'GAMESIM',
     'HELLO',
@@ -164,7 +165,6 @@ CLEAN_PROGRAMS = {
 # Programs that compile but have commented-out code (missing functionality).
 # Move to CLEAN_PROGRAMS when all commented lines are resolved.
 INCOMPLETE_PROGRAMS = {
-    'DDTEST',
     'DOSTEST',
     'PROCFUNC',
     'PTRMEM',

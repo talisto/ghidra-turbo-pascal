@@ -36,16 +36,19 @@ class ExeStringReader:
         # MZ header: word at offset 8 = header size in paragraphs (16 bytes)
         self._code_start = struct.unpack_from('<H', self._data, 8)[0] * 16
 
-    def read_string(self, offset):
+    def read_string(self, offset, allow_empty=False):
         """Read a Pascal string at the given code-relative offset.
 
         Returns the string text, or None if invalid.
+        If allow_empty=True, returns '' for zero-length strings.
         """
         abs_off = self._code_start + offset
         if abs_off >= len(self._data):
             return None
         strlen = self._data[abs_off]
-        if strlen == 0 or abs_off + 1 + strlen > len(self._data):
+        if strlen == 0:
+            return '' if allow_empty else None
+        if abs_off + 1 + strlen > len(self._data):
             return None
         raw = self._data[abs_off + 1 : abs_off + 1 + strlen]
         if all(0x20 <= b <= 0x7e for b in raw):

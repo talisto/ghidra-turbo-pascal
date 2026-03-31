@@ -25,6 +25,129 @@ _LABEL_TO_PASCAL = {
     'crt_gotoxy_impl': 'GotoXY',
 }
 
+# ── DDPlus function mappings ──
+
+# DDPlus functions that take a string pointer as (offset, segment):
+_DDP_STRING_FUNCS = {
+    'ddp_swriteln': 'swriteln',
+    'ddp_swrite': 'swrite',
+    'ddp_sendtext': 'sendtext',
+}
+
+# DDPlus functions with simple args (no string resolution needed):
+_DDP_SIMPLE_FUNCS = {
+    'ddp_sclrscr': 'sclrscr',
+    'ddp_sclreol': 'sclreol',
+    'ddp_sgoto_xy': 'sgoto_xy',
+    'ddp_set_foreground': 'set_foreground',
+    'ddp_set_background': 'set_background',
+    'ddp_set_color': 'set_color',
+    'ddp_clear_region': 'Clear_Region',
+    'ddp_propeller': 'Propeller',
+    'ddp_skeypressed': 'skeypressed',
+    'ddp_elapsed': 'elapsed',
+    'ddp_time_used': 'Time_used',
+}
+
+
+def _resolve_ddp_string(offset_str, func_info):
+    """Try to resolve a DDPlus string offset to its text value.
+
+    DDPlus functions pass strings as (offset, segment) where offset is the
+    byte position within the EXE code/data area.
+    """
+    try:
+        offset = int(offset_str, 16) if offset_str.startswith('0x') else int(offset_str)
+    except ValueError:
+        return None
+
+    sdb = func_info.get('strings_db', {})
+    result = sdb.get(offset)
+    if result is not None:
+        return result
+
+    exe_reader = func_info.get('exe_reader')
+    if exe_reader:
+        result = exe_reader.read_string(offset, allow_empty=True)
+        if result is not None:
+            return result
+
+    return None
+
+
+def _escape_pascal_str(s):
+    """Escape a string for Pascal single-quoted literal."""
+    return s.replace("'", "''")
+
+
+def _convert_ddp_call(fname, line, func_info):
+    """Convert a DDPlus library call to Pascal.
+
+    Handles string argument resolution, char conversion, and simple renaming.
+    """
+    indent = '  '
+
+    # swritec: convert integer arg to char literal
+    if fname == 'ddp_swritec':
+        args_match = re.search(r'\((.+)\)', line)
+        if args_match:
+            arg = args_match.group(1).strip()
+            try:
+                val = int(arg, 16) if arg.startswith('0x') else int(arg)
+                if 0x20 <= val <= 0x7e:
+                    ch = chr(val)
+                    if ch == "'":
+                        return f"{indent}swritec('''');"
+                    return f"{indent}swritec('{ch}');"
+                else:
+                    return f"{indent}swritec(Chr({val}));"
+            except ValueError:
+                return f"{indent}swritec({convert_expression(arg)});"
+        return f'{indent}swritec;'
+
+    # swritexy: (str_off, str_seg, extra_args...) → swritexy(args..., 'string')
+    if fname == 'ddp_swritexy':
+        args_match = re.search(r'\((.+)\)', line)
+        if args_match:
+            parts = [a.strip() for a in args_match.group(1).split(',')]
+            if len(parts) >= 4:
+                str_val = _resolve_ddp_string(parts[0], func_info)
+                if str_val is not None:
+                    escaped = _escape_pascal_str(str_val)
+                    # Remaining args after (offset, segment) are the positional params
+                    extra = ', '.join(parts[2:])
+                    return f"{indent}swritexy({extra}, '{escaped}');"
+            return f'{indent}{{ {line.strip()} }}'
+        return f'{indent}swritexy;'
+
+    # String functions: (str_off, str_seg) → function('string')
+    if fname in _DDP_STRING_FUNCS:
+        pascal_name = _DDP_STRING_FUNCS[fname]
+        args_match = re.search(r'\((.+)\)', line)
+        if args_match:
+            parts = [a.strip() for a in args_match.group(1).split(',')]
+            if len(parts) >= 2:
+                str_val = _resolve_ddp_string(parts[0], func_info)
+                if str_val is not None:
+                    escaped = _escape_pascal_str(str_val)
+                    return f"{indent}{pascal_name}('{escaped}');"
+                # Can't resolve string — leave as comment
+                return f'{indent}{{ {line.strip()} }}'
+        # No args (from DAT_ dispatch) — emit empty string call
+        return f"{indent}{pascal_name}('');"
+
+    # Simple functions: just rename and pass args through
+    if fname in _DDP_SIMPLE_FUNCS:
+        pascal_name = _DDP_SIMPLE_FUNCS[fname]
+        args_match = re.search(r'\((.+)\)', line)
+        if args_match:
+            args = convert_expression(args_match.group(1))
+            return f'{indent}{pascal_name}({args});'
+        return f'{indent}{pascal_name};'
+
+    # Unknown ddp_ function — comment out
+    return f'{indent}{{ {line.strip()} }}'
+
 
 # Lines to strip entirely (noise)
 NOISE_PATTERNS = [
@@ -80,6 +203,16 @@ NOISE_PATTERNS = [
     re.compile(r'^\s*func_0x[0-9a-f]+\s*\('),
     # DAT_ with direct dereference in assignment context
     re.compile(r'^\s*DAT_\w+\s*=\s*DAT_'),
+    # Ghidra field access syntax (byte-level sub-word access)
+    re.compile(r'^\s*\w+\._\d+_\d+_\s*='),
+    # FLIRT-mangled string/Val operations (args via stack, not resolvable)
+    re.compile(r'^\s*_Val__Longint_qm6Stringm7Integer\s*\('),
+    re.compile(r'^\s*_Delete_qm6String7Integert2\s*\('),
+    # No-arg PrintString (args via DAT_ globals)
+    re.compile(r'^\s*__PrintString\s*\(\s*\)\s*;'),
+    # Dead code: assignments from Ghidra registers/DAT_ variables
+    re.compile(r'^\s*\w+\s*=\s*extraout_\w+\s*;'),
+    re.compile(r'^\s*\w+\s*=\s*DAT_\w+\s*;'),
 ]
 
 
@@ -510,6 +643,140 @@ def _convert_for_loop(for_content, indent):
     return f'{indent}{{ for loop: for ({for_content}) }}'
 
 
+# Patterns for string concatenation sequence detection
+_STR_CONCAT_DELETE_RE = re.compile(
+    r'^\s*(?:bp_delete|_Delete_qm6String7Integert2)\s*\(\s*'
+    r'(0x[0-9a-f]+|\d+)\s*,\s*(0x[0-9a-f]+|\w+)\s*\)\s*;')
+_STR_CONCAT_APPEND_RE = re.compile(
+    r'^\s*(?:bp_str_append|FUN_\w+_0e45)\s*\(\s*'
+    r'(0x[0-9a-f]+|\d+)\s*,\s*(0x[0-9a-f]+|unaff_\w+)\s*\)\s*;')
+_STR_CONCAT_WRITE_RE = re.compile(
+    r'^\s*(?:ddp_swriteln|ddp_swrite|FUN_\w+_13b6|FUN_\w+_130c)\s*\(\s*'
+    r'(?:puVar\d+|local_\w+)\s*,\s*(?:uVar\d+|unaff_\w+)\s*\)\s*;')
+_STR_CONCAT_PTRSET_RE = re.compile(
+    r'^\s*puVar\d+\s*=\s*local_\w+\s*;')
+_STR_CONCAT_SEGSET_RE = re.compile(
+    r'^\s*uVar\d+\s*=\s*unaff_\w+\s*;')
+
+
+def _resolve_concat_part(offset_str, seg_str, func_info, exe_reader):
+    """Resolve a string concat part to either a string literal or global var name.
+
+    For (offset, unaff_DS) → data segment global → g_XXXX
+    For (offset, hex_segment) → try string lookup, else g_XXXX
+    """
+    try:
+        offset = int(offset_str, 16) if offset_str.startswith('0x') else int(offset_str)
+    except ValueError:
+        return None
+
+    # If segment is unaff_DS, this is a data segment variable reference
+    if seg_str == 'unaff_DS':
+        return f'g_{offset:04X}'
+
+    # Try string resolution
+    sdb = func_info.get('strings_db', {})
+    result = sdb.get(offset)
+    if result is not None:
+        return f"'{_escape_pascal_str(result)}'"
+
+    if exe_reader:
+        result = exe_reader.read_string(offset, allow_empty=True)
+        if result is not None:
+            return f"'{_escape_pascal_str(result)}'"
+
+    # Can't resolve — use global variable reference
+    return f'g_{offset:04X}'
+
+
+def _merge_string_concat_sequences(lines, func_info, exe_reader):
+    """Detect and merge DDPlus string concatenation sequences.
+
+    Detects:
+        puVar1 = local_104;                    (optional)
+        uVar2 = unaff_SS;                      (optional)
+        bp_delete(offset, segment);             (start of concat)
+        bp_str_append(offset, segment);         (0 or more)
+        ddp_swriteln(puVar1, uVar2);            (output call)
+
+    Replaces the entire sequence with:
+        ddp_swriteln_CONCAT('part1' + g_XXXX + 'part2');
+    which will be converted to swriteln('part1' + g_XXXX + 'part2') by
+    the DDPlus handler.
+    """
+    result = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Check for pointer/segment save lines that precede a concat sequence
+        if _STR_CONCAT_PTRSET_RE.match(stripped):
+            # Look ahead: is this followed by a concat sequence?
+            j = i + 1
+            # Skip optional segment save
+            if j < len(lines) and _STR_CONCAT_SEGSET_RE.match(lines[j].strip()):
+                j += 1
+            if j < len(lines) and _STR_CONCAT_DELETE_RE.match(lines[j].strip()):
+                # This IS a concat sequence start — skip the ptr/seg save lines
+                # (they'll be consumed by the delete handler below)
+                result.append(line)  # keep the line but it'll be stripped as noise
+                i += 1
+                continue
+
+        # Check for bp_delete starting a concat sequence
+        del_match = _STR_CONCAT_DELETE_RE.match(stripped)
+        if del_match:
+            init_offset = del_match.group(1)
+            init_seg = del_match.group(2)
+
+            # Collect all subsequent bp_str_append calls
+            parts = []
+            init_str = _resolve_concat_part(init_offset, init_seg, func_info, exe_reader)
+            if init_str is not None:
+                parts.append(init_str)
+
+            j = i + 1
+            while j < len(lines):
+                app_match = _STR_CONCAT_APPEND_RE.match(lines[j].strip())
+                if app_match:
+                    part = _resolve_concat_part(
+                        app_match.group(1), app_match.group(2),
+                        func_info, exe_reader)
+                    if part is not None:
+                        parts.append(part)
+                    j += 1
+                else:
+                    break
+
+            # Check if next line is the write call with puVar/uVar args
+            if j < len(lines) and _STR_CONCAT_WRITE_RE.match(lines[j].strip()):
+                write_line = lines[j].strip()
+                # Determine if it's swrite or swriteln
+                if 'swriteln' in write_line or '13b6' in write_line:
+                    write_func = 'ddp_swriteln'
+                else:
+                    write_func = 'ddp_swrite'
+
+                # Build the concatenated argument
+                concat_arg = ' + '.join(parts) if parts else "''"
+
+                # Replace entire sequence with a single merged call
+                indent = '  ' * (len(line) - len(line.lstrip()))
+                merged = f'{indent}{write_func}_CONCAT({concat_arg});'
+                # Skip all consumed lines, emit merged line
+                for _ in range(i, j + 1):
+                    result.append('')  # blank lines to preserve line numbering
+                result[-1] = merged  # replace last blank with merged line
+                i = j + 1
+                continue
+
+        result.append(line)
+        i += 1
+
+    return result
+
+
 def convert_function_body(body, strings_db, func_info, exe_reader=None):
     """Convert a C function body to Pascal statements.
 
@@ -523,6 +790,10 @@ def convert_function_body(body, strings_db, func_info, exe_reader=None):
     inner = body[brace_start + 1:brace_end] if brace_end > brace_start else body[brace_start + 1:]
 
     lines = inner.split('\n')
+
+    # Phase 0.5: Detect and merge DDPlus string concatenation sequences
+    # Pattern: [puVar=local] [uVar=seg] bp_delete(off,seg) bp_str_append(...)* ddp_swriteln(puVar,uVar)
+    lines = _merge_string_concat_sequences(lines, func_info, exe_reader)
 
     # Phase 1: Detect and convert Write/WriteLn sequences
     write_seqs = detect_write_sequences(lines, strings_db, exe_reader)
@@ -1009,6 +1280,13 @@ def convert_c_line(line, func_info):
             'bp_str_temp_free', 'bp_unit_init',
             'bp___stackcheck', 'bp___systeminit',
             'bp_textrec_init', 'bp_text_open_check',
+            # String building internals (part of concatenation sequences)
+            'bp_delete', 'bp_str_append',
+            # FLIRT-mangled string operations
+            '_Delete_qm6String7Integert2',
+            # Val/Str conversion internals
+            'bp_val__longint',
+            '_Val__Longint_qm6Stringm7Integer',
         }
         if fname in skip_names:
             return None
@@ -1046,6 +1324,16 @@ def convert_c_line(line, func_info):
                             escaped = string_val.replace("'", "''")
                             return f"{indent}{{ {var_name} := '{escaped}'; }}"
             return f'{indent}{{ {line} }}'
+        # DDPlus library functions — resolve strings, convert chars
+        if fname.startswith('ddp_'):
+            # Handle synthesized concat calls from _merge_string_concat_sequences
+            if fname in ('ddp_swriteln_CONCAT', 'ddp_swrite_CONCAT'):
+                pascal_name = 'swriteln' if 'swriteln' in fname else 'swrite'
+                args_match = re.search(r'\((.+)\)', line)
+                if args_match:
+                    return f'{indent}{pascal_name}({args_match.group(1)});'
+                return f'{indent}{pascal_name};'
+            return _convert_ddp_call(fname, line, func_info)
         # Library label → Pascal builtin
         if fname in _LABEL_TO_PASCAL:
             pascal_name = _LABEL_TO_PASCAL[fname]

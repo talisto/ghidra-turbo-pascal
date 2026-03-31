@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.24.0] - 2026-03-31
+
+### Added
+- `pascal_emit/body_converter.py`: DDPlus library function support — 16 DDPlus function labels (`ddp_swriteln`, `ddp_swrite`, `ddp_sclrscr`, `ddp_sclreol`, `ddp_swritec`, `ddp_swritexy`, `ddp_sgoto_xy`, `ddp_set_foreground`, `ddp_set_background`, `ddp_set_color`, `ddp_clear_region`, `ddp_propeller`, `ddp_sendtext`, `ddp_skeypressed`, `ddp_elapsed`, `ddp_time_used`) now convert to their Pascal equivalents with proper string argument resolution and char literal conversion
+- `pascal_emit/body_converter.py`: DDPlus string concatenation sequence detection — `bp_delete` + `bp_str_append` + `ddp_swriteln(puVar,uVar)` sequences are merged into single `swriteln('str' + g_XXXX + ...)` calls, resolving string literals from strings.json / EXE and data segment variables to `g_XXXX` globals
+- `pascal_emit/body_converter.py`: noise patterns for `_Val__Longint`, `_Delete_qm6String`, `__PrintString()`, Ghidra field access (`var._N_N_`), and dead-code assignments from Ghidra registers (`extraout_`, `DAT_`)
+- `pascal_emit/pipeline.py`: `ddplus` unit auto-detection in uses clause when DDPlus labels are present
+
+### Changed
+- `pascal_emit/pipeline.py`: CONCAT11 cleanup regex now handles numbered variants (`extraout_AH_00`, `extraout_AH_01`, etc.) — previously only matched bare `extraout_AH`
+- `pascal_emit/pipeline.py`: `(uint)extraout_AH_XX << N` shift artifacts replaced with `0` (high byte from CONCAT11 decomposition is always 0)
+- `pascal_emit/pipeline.py`: `exe_reader` now passed through `func_info` dict for DDPlus string resolution in body_converter
+- `pascal_emit/strings.py`: `ExeStringReader.read_string()` accepts `allow_empty=True` to return `''` for zero-length Pascal strings instead of None
+- `pascal_emit/body_converter.py`: `bp_delete`, `bp_str_append`, `bp_val__longint`, `_Delete_qm6String7Integert2`, `_Val__Longint_qm6Stringm7Integer` added to skip_names (string building / type conversion internals)
+- DDTEST: 95 → 0 commented lines — **moved to Clean tier** (DDPlus function conversion, string resolution, and string concat sequence merging resolved all remaining lines)
+- 9 programs now produce fully clean output with 0 non-stub commented lines (up from 8)
+- `test_fpc_compilation.py`: DDTEST moved from COMPILING_PROGRAMS to EXPECTED_FAILURES (needs external `ddplus` unit unavailable in FPC), and from INCOMPLETE_PROGRAMS to CLEAN_PROGRAMS
+
 ## [2.23.0] - 2026-04-01
 
 ### Added
