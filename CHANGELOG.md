@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `pascal_emit/pipeline.py`: auto-detect array-typed temp variables — when a temp variable like `iVar1` is used with indexed access (`iVar1[21]`), it's declared as `array[0..N] of Integer` instead of `Integer`, fixing "Illegal qualifier" errors (RECORDS 24→3 errors)
+
+### Fixed
+- `pascal_emit/pipeline.py`: placeholder args for empty procedure calls now skip procedures with `var` parameters — instead of passing literal `0` (which causes "Variable identifier expected"), the call is commented out
+
 ## [2.10.0] - 2026-03-30
 
 ### Changed

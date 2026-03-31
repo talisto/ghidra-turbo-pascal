@@ -185,37 +185,61 @@ def _collect_undeclared_temps(body_text):
     """Scan a converted body for temp variable references and return declarations.
 
     Returns list of (name, type) tuples for variables like iVar1, uVar5, etc.
+    If a temp var is used with indexed access (e.g., iVar1[21]), it's typed as
+    an array instead of a scalar.
     """
     found = set()
     for m in _TEMP_VAR_RE.finditer(body_text):
         found.add(m.group(1))
 
+    # Detect indexed access: varName[N] → need array type
+    _INDEXED_RE = re.compile(r'\b(\w+)\[(\d+)\]')
+    max_index = {}
+    for m in _INDEXED_RE.finditer(body_text):
+        vname = m.group(1)
+        idx = int(m.group(2))
+        if vname in found:
+            max_index[vname] = max(max_index.get(vname, 0), idx)
+
     result = []
     for name in sorted(found):
-        prefix = name[0]
-        ptype = _TEMP_VAR_TYPES.get(prefix, 'Integer')
-        result.append((name, ptype))
+        if name in max_index:
+            # Variable used with indexing → declare as array
+            hi = max_index[name]
+            result.append((name, f'array[0..{hi}] of Integer'))
+        else:
+            prefix = name[0]
+            ptype = _TEMP_VAR_TYPES.get(prefix, 'Integer')
+            result.append((name, ptype))
     return result
 
 
-def _fix_empty_proc_calls(body, proc_param_counts):
+def _fix_empty_proc_calls(body, proc_param_info):
     """Fix procedure calls with missing arguments.
 
     When Ghidra can't resolve BP7 stack-based argument passing, it emits
     FUN_xxxx() with no args, but the procedure actually has parameters.
     Add placeholder 0 args to match the declaration's param count.
+    Calls to procedures with var params are commented out instead (can't
+    pass literal 0 to var params).
     """
-    if not proc_param_counts:
+    if not proc_param_info:
         return body
     lines = body.split('\n')
     result = []
     for line in lines:
         stripped = line.strip().rstrip(';')
-        if stripped in proc_param_counts:
-            count = proc_param_counts[stripped]
+        if stripped in proc_param_info:
+            count, has_var = proc_param_info[stripped]
             if count > 0:
-                placeholders = ', '.join(['0'] * count)
-                line = line.replace(stripped + ';', f'{stripped}({placeholders});')
+                if has_var:
+                    # Can't pass literals to var params — comment out
+                    indent = line[:len(line) - len(line.lstrip())]
+                    line = f'{indent}{{ {stripped}; }}'
+                else:
+                    placeholders = ', '.join(['0'] * count)
+                    line = line.replace(
+                        stripped + ';', f'{stripped}({placeholders});')
         result.append(line)
     return '\n'.join(result)
 
@@ -521,21 +545,24 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
     # Build map of procedure names to required param counts for fixing
     # empty calls (Ghidra emits FUN_xxxx() with no args when it can't
     # resolve BP7 stack-based argument passing)
-    proc_param_counts = {}
+    proc_param_info = {}
     for func in pascal_funcs:
         pname = func['pascal_name']
         decl = func['declaration']
         # Count params from declaration: procedure Name(p1: T; p2: T);
         param_match = re.search(r'\(([^)]+)\)', decl)
         if param_match:
-            proc_param_counts[pname] = len(param_match.group(1).split(';'))
+            param_text = param_match.group(1)
+            count = len(param_text.split(';'))
+            has_var = 'var ' in param_text
+            proc_param_info[pname] = (count, has_var)
 
     # Fix procedure calls with missing arguments (placeholder 0 values)
-    if proc_param_counts:
-        main_body = _fix_empty_proc_calls(main_body, proc_param_counts)
+    if proc_param_info:
+        main_body = _fix_empty_proc_calls(main_body, proc_param_info)
         for func in pascal_funcs:
             func['body'] = _fix_empty_proc_calls(
-                func['body'], proc_param_counts)
+                func['body'], proc_param_info)
 
     # Emit
     pascal_text = emit_pascal(program_name, uses, referenced_globals, pascal_funcs,
