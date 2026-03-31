@@ -31,9 +31,18 @@ Assessed against 16 test programs with known original source:
 | Metric | Value |
 |--------|-------|
 | Programs that compile (FPC -Mtp -Sc) | **15/16** (93.75%) |
-| Programs with 0 commented lines | **6/16** (CONTROL, EXITPROC, HELLO, MATHOPS, TYPECAST, + 1 more with only stubs) |
-| Total commented lines (non-stub) | **~163** across all programs |
-| Total commented lines (stub-only: CRTTEST, OVRTEST) | **6** |
+| Programs **successfully transpiled** (compile + 0 non-stub commented lines) | **7/16** (43.75%) |
+| Total commented lines (non-stub) | **~188** across all programs |
+
+**Quality tier breakdown:**
+
+| Tier | Programs | Count |
+|------|----------|-------|
+| **Clean** (compiles, 0 non-stub commented lines) | CONTROL, CRTTEST, EXITPROC, HELLO, MATHOPS, OVRTEST, TYPECAST | 7 |
+| **Incomplete** (compiles, but has commented-out code = missing functionality) | DDTEST(95), DOSTEST(18), GAMESIM(2), PROCFUNC(11), PTRMEM(11), RANDTEST(1), RECORDS(9), STRINGS(25) | 8 |
+| **Broken** (does not compile) | FILEIO(16) | 1 |
+
+> **Important**: A program is NOT considered successfully transpiled if it contains ANY commented-out code (excluding cross-segment stubs). Every commented-out line — even a single `{ bp_delete(); }` — represents missing functionality. The transpiled program will not behave the same as the original.
 
 | Area | Status | Notes |
 |------|--------|-------|
@@ -304,10 +313,12 @@ The entry function contains system initialization code (runtime init, I/O init, 
 
 **Status**: Complete — `tests/test_fpc_compilation.py` automatically compiles all generated `.pas` files with `fpc -Mtp` (Turbo Pascal mode). Regression protection for 8 currently-compiling programs, expected-failure tracking for 8 programs with known issues. Run with `pytest tests/test_fpc_compilation.py -v`.
 
-**Current compilation scorecard** (11/16 = 68.75%):
-| Compiles | Fails |
-|----------|-------|
-| HELLO, CONTROL, MATHOPS, CRTTEST, RANDTEST, TYPECAST, EXITPROC, OVRTEST, STRINGS, DOSTEST, GAMESIM | PROCFUNC, FILEIO, RECORDS, PTRMEM, DDTEST |
+**Current scorecard** (15/16 compile, 7/16 successfully transpiled):
+| Tier | Programs |
+|------|----------|
+| Clean (0 non-stub commented lines) | CONTROL, CRTTEST, EXITPROC, HELLO, MATHOPS, OVRTEST, TYPECAST |
+| Incomplete (commented-out code = missing functionality) | DDTEST, DOSTEST, GAMESIM, PROCFUNC, PTRMEM, RANDTEST, RECORDS, STRINGS |
+| Broken (does not compile) | FILEIO |
 
 ### 5.2 Behavioral Comparison Testing
 

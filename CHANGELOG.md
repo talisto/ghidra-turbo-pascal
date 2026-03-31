@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `test_fpc_compilation.py`: replaced hollow-body detection with strict commented-line counting — `CLEAN_PROGRAMS` (7) must have exactly 0 non-stub commented lines, `INCOMPLETE_PROGRAMS` (8) are tracked for regression; removed `_find_hollow_functions()` in favor of simpler `_count_commented_lines()`
+- `ROADMAP.md`: corrected quality metrics — 7/16 successfully transpiled (not 12/16); DOSTEST, GAMESIM, RANDTEST, RECORDS, STRINGS correctly categorized as Incomplete (have commented-out code = missing functionality)
+
 ## [2.21.0] - 2026-03-31
 
 ### Added
