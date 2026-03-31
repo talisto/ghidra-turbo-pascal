@@ -2,7 +2,7 @@
 
 > A prioritized plan for producing working Turbo Pascal 7 source files from Ghidra-decompiled DOS MZ executables. The goal is not byte-identical reproduction — it's **functional Pascal programs** that compile with TP7/FPC and produce the same observable behavior as the original.
 
-## Current State (v2.0.0)
+## Current State (v2.21.0)
 
 | Capability | Status |
 |------------|--------|
@@ -10,24 +10,50 @@
 | FLIRT + hash-based RTL function labeling (~90 signatures) | ✅ Complete |
 | Single-pass headless decompilation pipeline | ✅ Complete |
 | Overlay (.OVR) loading | ✅ Complete |
-| 16 test binaries with full pytest coverage | ✅ Complete |
-| C-to-Pascal transpiler (`pascal_emit.py`) | ✅ Prototype |
+| 16 test binaries with full pytest coverage | ✅ Complete (643 tests) |
+| C-to-Pascal transpiler (`pascal_emit/`) | ✅ Functional — 15/16 compile |
 | Library code elimination in decompiled output | ✅ Complete |
 | Artifact cleanup (CONCAT11, unaff_DS, calling conventions) | ✅ Complete |
 | BP7 type definitions registered in Ghidra (TextRec, FileRec, etc.) | ✅ Registered (not yet applied) |
+| Write/WriteLn sequence detection and merging | ✅ Complete (str, int, longint, char, real, bool) |
+| Case statement reconstruction | ✅ Complete (if/else chains → case..of with ranges) |
+| For loop conversion | ✅ Complete (counting loops to for..to/downto) |
+| Auto-declared temp variables | ✅ Complete (iVar, uVar, cVar, bVar) |
+| Global variable detection and declaration | ✅ Complete |
+| String global auto-retyping | ✅ Complete (Integer → String[N] when string-assigned) |
+| Cross-segment Proc_/Func_ stub generation | ✅ Complete |
+| Noise line suppression | ✅ Complete (~40 patterns) |
 
-### Current Pascal Output Quality
+### Current Pascal Output Quality (v2.21.0)
 
-The transpiler (`pascal_emit.py`) can emit `.pas` files, but they are **not compilable or functional**. Assessed against 16 test programs with known original source:
+Assessed against 16 test programs with known original source:
 
-| Area | Status | Example Problem |
-|------|--------|-----------------|
+| Metric | Value |
+|--------|-------|
+| Programs that compile (FPC -Mtp -Sc) | **15/16** (93.75%) |
+| Programs with 0 commented lines | **6/16** (CONTROL, EXITPROC, HELLO, MATHOPS, TYPECAST, + 1 more with only stubs) |
+| Total commented lines (non-stub) | **~163** across all programs |
+| Total commented lines (stub-only: CRTTEST, OVRTEST) | **6** |
+
+| Area | Status | Notes |
+|------|--------|-------|
 | Trivial programs (WriteLn only) | ✅ Works | HELLO.pas compiles and runs |
-| Global variables | 🟡 Partial | Named as `g_0052` — correct type, wrong name |
-| WriteLn/Write sequences | 🟡 Partial | Most detected; some emit `{int}` or `{???}` placeholders |
+| Global variables | ✅ Working | Named as `g_XXXX`, auto-typed (Integer/Word/Byte/String[N]) |
+| WriteLn/Write sequences | ✅ Working | Str, Int, LongInt, Char, Real, Bool merged into Write calls |
 | Arithmetic operators | ✅ Fixed | `div`, `mod`, `and`, `or`, `xor`, `not`, `shl`, `shr` |
 | Bitwise/logical operators | ✅ Fixed | `and`/`or`/`xor`/`not`/`shl`/`shr` converted |
-| For loops | ❌ Not implemented | Emitted as `{ for loop: ... }` comments |
+| For loops | ✅ Fixed | Counting loops converted to `for..to/downto` |
+| Case statements | ✅ Fixed | `if/else if` chains → `case...of` with ranges |
+| String operations | ❌ Non-functional | String type lost; Concat/Copy/Pos/Length/Delete/Insert are raw calls |
+| Record types | ❌ Not recovered | Field access as `*(int *)(ptr + 0x15)` |
+| Nested procedures | ❌ Not recovered | Flattened to separate procedures with frame pointer params |
+| File I/O | ❌ Non-functional | Assign/Reset/Rewrite/ReadLn are unresolved FUN_xxxx calls |
+| Type casts | ✅ Fixed | `(ulong)x` → `LongInt(x)`, `(uint)x` → `Word(x)`, etc. |
+| 32-bit arithmetic | ❌ Broken | LongInt operations decomposed to 16-bit carry pairs |
+| Undeclared variables | ✅ Fixed | `iVar1`, `uVar5` auto-declared with inferred types |
+| WriteLn longint values | ✅ Fixed | Values extracted from stack push patterns |
+| Array types | ❌ Not recovered | Array access as pointer arithmetic |
+| CRT functions | ✅ Working | WhereX, WhereY, GotoXY, TextAttr, ReadKey, KeyPressed |
 | Case statements | ✅ Fixed | `if/else if` chains reconstructed to `case...of` with ranges |
 | String operations | ❌ Non-functional | String type lost; Concat/Copy/Pos/Length/Delete/Insert are raw calls |
 | Record types | ❌ Not recovered | Field access as `*(int *)(ptr + 0x15)` |
@@ -65,14 +91,9 @@ These are pure Python fixes in `pascal_emit.py` that don't require any Ghidra ch
 | `(ulong)x` | `LongInt(x)` |
 | `(uint)x` | `Word(x)` |
 
-### 1.2 Implement For Loop Conversion
+### 1.2 Implement For Loop Conversion ✅
 
-Ghidra emits for loops as C `for(init; cond; step)`. Currently emitted as comments. Convert to Pascal `for i := start to/downto end do`.
-
-**Detection patterns:**
-- `for (local_N = START; local_N != END; local_N = local_N + 1)` → `for local_N := START to END do`
-- `for (local_N = START; local_N != END; local_N = local_N - 1)` → `for local_N := START downto END do`
-- Comma operator in condition (assignment in loop header): extract body assignment, emit before loop
+**Status**: Complete — `_convert_for_loop()` in `body_converter.py` converts C `for` loops to Pascal `for..to/downto` for simple counting patterns. Complex loops fall back to `while` with initialization.
 
 ### 1.3 Fix Case Statement Reconstruction ✅
 
