@@ -38,7 +38,7 @@ WRITE_STR_CALL_RE = re.compile(
     r'(?:bp_write_str(?:_body)?|FUN_\w+_0670|_Write_qm4Text(?:m6String|7String)4Word)\s*\('
 )
 WRITE_STR_ARGS_RE = re.compile(
-    r'(?:bp_write_str(?:_body)?|FUN_\w+_0670)\s*\(\s*\d+\s*,\s*(0x[0-9a-f]+|\d+)\s*,\s*0x[0-9a-f]+\s*\)'
+    r'(?:bp_write_str(?:_body)?|FUN_\w+_0670|_Write_qm4Text(?:m6String|7String)4Word)\s*\(\s*(?:\d+|0x[0-9a-f]+)\s*,\s*(0x[0-9a-f]+|\d+)\s*,\s*(?:0x[0-9a-f]+|unaff_\w+)\s*\)'
 )
 WRITE_INT_RE = re.compile(
     r'(?:bp_write_int)\s*\('
@@ -56,7 +56,7 @@ WRITE_CHAR_RE = re.compile(
     r'(?:bp_write_char(?:_buf)?|_Write_qm4Text4Char\w*|FUN_\w+_067b)\s*\('
 )
 WRITE_CHAR_ARGS_RE = re.compile(
-    r'(?:bp_write_char(?:_buf)?|_Write_qm4Text4Char\w*|FUN_\w+_067b)\s*\(\s*\d+\s*,\s*(\d+|0x[0-9a-f]+)\s*(?:,|\))'
+    r'(?:bp_write_char(?:_buf)?|_Write_qm4Text4Char\w*|FUN_\w+_067b)\s*\(\s*(?:\d+|0x[0-9a-f]+)\s*,\s*(\d+|0x[0-9a-f]+)\s*(?:,|\))'
 )
 WRITE_REAL_RE = re.compile(
     r'(?:bp_write_real|_Write_qm4Text4Real\w*|FUN_\w+_078a)\s*\('
@@ -85,6 +85,13 @@ DAT_VALUE_RE = re.compile(r'DAT_\w+ = (\*\(int \*\)0x[0-9a-f]+)')
 
 # IO check function: both hash-labeled and unlabeled forms
 _IOCHECK_RE = re.compile(r'(?:bp_iocheck|FUN_\w+_0291)\s*\(')
+
+# Stack-pushed string offset: *(word *)(puVar + -0x10a) = 0xNN;
+# In BP7 stack convention, the string offset is stored at stack offset -0x10a
+# Raw Ghidra output uses undefined2 instead of word
+_STACK_STR_OFFSET_RE = re.compile(
+    r'\*\((?:word|undefined2) \*\)\(\w+ \+ -0x10a\) = (0x[0-9a-f]+|\d+)\s*;'
+)
 
 
 def _is_iocheck(line):
@@ -159,6 +166,18 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
                         text = strings_db.get(offset_val)
                         if not text and exe_reader:
                             text = exe_reader.read_string(offset_val)
+                # Fallback for zero-arg calls: extract string offset from
+                # stack pushes (Borland Pascal convention: offset at -0x10a)
+                if not text and jline.rstrip(';').endswith('()'):
+                    for k in range(j - 1, max(start_idx, j - 8), -1):
+                        kline = lines[k].strip()
+                        m_stk = _STACK_STR_OFFSET_RE.search(kline)
+                        if m_stk:
+                            stk_off = int(m_stk.group(1), 0)
+                            text = strings_db.get(stk_off)
+                            if not text and exe_reader:
+                                text = exe_reader.read_string(stk_off)
+                            break
                 if not text and dat_annotations:
                     text = dat_annotations[-1]
                 if not text and dat_values:

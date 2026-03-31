@@ -32,6 +32,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 11 programs now produce fully clean output with 0 non-stub commented lines (up from 9)
 - `test_fpc_compilation.py`: RANDTEST moved to CLEAN_PROGRAMS; FILEIO added to INCOMPLETE_PROGRAMS
 
+### Fixed
+- `pascal_emit/write_sequences.py`: `WRITE_STR_ARGS_RE` now accepts hex width values like `0x10` (previously only matched decimal `\d+`), fixing string resolution for field-width formatted Write calls — resolves 2 `{???}` placeholders in RECORDS
+- `pascal_emit/write_sequences.py`: `WRITE_STR_ARGS_RE` now includes FLIRT-named `_Write_qm4Text` patterns for argument extraction (previously only matched hash-labeled `bp_write_str` and `FUN_\w+_0670`)
+- `pascal_emit/write_sequences.py`: `WRITE_STR_ARGS_RE` now accepts `unaff_DS` / `unaff_\w+` as the segment argument (previously required hex constant `0x[0-9a-f]+`)
+- `pascal_emit/write_sequences.py`: `WRITE_CHAR_ARGS_RE` now accepts hex width values like `0x10` (same fix as `WRITE_STR_ARGS_RE`)
+
+### Added
+- `pascal_emit/write_sequences.py`: stack-push string offset fallback — for zero-arg Write calls (Borland Pascal stack convention), scans backwards for `*(undefined2 *)(puVar + -0x10a) = offset` to extract the string offset when direct function args aren't available
+
+### Changed
+- RECORDS: 8 → 6 `{???}` placeholders (hex width fix resolved `'Name'` and `'-----'` column headers)
+- Total commented lines across all programs: 34 (unchanged)
+- Total `{???}` placeholders: 21 → 19 (RECORDS hex width fix)
+
 ## [2.24.0] - 2026-03-31
 
 ### Added
