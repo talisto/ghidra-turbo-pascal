@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-03-30
+
 ### Added
 - `pascal_emit/expressions.py`: data segment address recognition — when a hex constant is followed by `unaff_DS` (data segment register) in function arguments, it's converted to a global variable reference (`0x75, unaff_DS` → `g_0075`) instead of a numeric literal, fixing `var` parameter compatibility
 
@@ -242,7 +244,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `label_functions.py`: system segment detection now uses core offset counting instead of fixed markers (`3fca`/`3f65`) for broader compatibility
 - `label_functions.py`: FLIRT description table expanded with `t1`-style mangled names (e.g., `_GotoXY_q4Bytet1`)
 
-[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.3.0...v2.4.0
