@@ -5,6 +5,22 @@ from .expressions import convert_expression, convert_condition, negate_condition
 from .types import c_type_to_pascal
 from .write_sequences import detect_write_sequences
 
+# Library label → Pascal builtin mapping (only functions that work as
+# standalone calls or whose args are explicitly present in the decompiled output)
+_LABEL_TO_PASCAL = {
+    'bp_random': 'Random',
+    'bp_randomize': 'Randomize',
+    'bp_halt': 'Halt',
+    'bp_delay': 'Delay',
+    'bp_readkey': 'ReadKey',
+    'bp_keypressed': 'KeyPressed',
+    'bp_gotoxy': 'GotoXY',
+    'bp_clrscr': 'ClrScr',
+    'bp_clreol': 'ClrEol',
+    'bp_textcolor': 'TextColor',
+    'bp_textbackground': 'TextBackground',
+}
+
 
 # Lines to strip entirely (noise)
 NOISE_PATTERNS = [
@@ -79,6 +95,91 @@ def is_system_init_line(line):
     return False
 
 
+# ── For loop patterns ──
+# Pattern: for (VAR = START; ..., VAR != END; VAR = VAR + 1)
+_FOR_UP_RE = re.compile(
+    r'^(\w+)\s*=\s*(.+?);\s*'           # init: var = start
+    r'(?:(.+?),\s*)?'                     # optional comma body
+    r'(\w+)\s*!=\s*(.+?);\s*'            # cond: var != end
+    r'(\w+)\s*=\s*\6\s*\+\s*1$'          # step: var = var + 1
+)
+# Pattern: for (VAR = START; ..., VAR != END; VAR = VAR - 1)
+_FOR_DOWN_RE = re.compile(
+    r'^(\w+)\s*=\s*(.+?);\s*'           # init: var = start
+    r'(?:(.+?),\s*)?'                     # optional comma body
+    r'(\w+)\s*!=\s*(.+?);\s*'            # cond: var != end
+    r'(\w+)\s*=\s*\6\s*-\s*1$'          # step: var = var - 1
+)
+# Pattern: for (; VAR != 0; VAR = VAR - 1)  (countdown to 0)
+_FOR_COUNTDOWN_RE = re.compile(
+    r'^;\s*'                              # no init
+    r'(?:(.+?),\s*)?'                     # optional comma body
+    r'(\w+)\s*!=\s*0;\s*'               # cond: var != 0
+    r'(\w+)\s*=\s*\3\s*-\s*1$'          # step: var = var - 1
+)
+
+
+def _convert_for_loop(for_content, indent):
+    """Convert a C for loop to Pascal.
+
+    Tries to match simple counting for loops and convert to Pascal for/downto.
+    Falls back to while loop for complex patterns.
+    """
+    # Try counting up: for (var = start; ..., var != end; var = var + 1)
+    m = _FOR_UP_RE.match(for_content)
+    if m:
+        var_init, start, comma_body, var_cond, end, var_step = m.groups()
+        if var_init == var_cond == var_step:
+            start_expr = convert_expression(start)
+            end_expr = convert_expression(end)
+            if comma_body:
+                # Comma operator: body runs BEFORE the != check, so the
+                # loop body executes for the end value too. The Pascal
+                # for loop is inclusive, so end_value = end.
+                pre_stmt = convert_expression(comma_body.strip())
+                return f'{indent}for {var_init} := {start_expr} to {end_expr} do begin\n{indent}  {pre_stmt};'
+            else:
+                # No comma body: loop stops BEFORE end value
+                try:
+                    end_val = int(end) - 1
+                    end_expr = str(end_val)
+                except ValueError:
+                    end_expr = convert_expression(end) + ' - 1'
+                return f'{indent}for {var_init} := {start_expr} to {end_expr} do begin'
+
+    # Try counting down: for (var = start; ..., var != end; var = var - 1)
+    m = _FOR_DOWN_RE.match(for_content)
+    if m:
+        var_init, start, comma_body, var_cond, end, var_step = m.groups()
+        if var_init == var_cond == var_step:
+            start_expr = convert_expression(start)
+            end_expr = convert_expression(end)
+            if comma_body:
+                pre_stmt = convert_expression(comma_body.strip())
+                return f'{indent}for {var_init} := {start_expr} downto {end_expr} do begin\n{indent}  {pre_stmt};'
+            else:
+                try:
+                    end_val = int(end) + 1
+                    end_expr = str(end_val)
+                except ValueError:
+                    end_expr = convert_expression(end) + ' + 1'
+                return f'{indent}for {var_init} := {start_expr} downto {end_expr} do begin'
+
+    # Try countdown to 0: for (; var != 0; var = var - 1)
+    m = _FOR_COUNTDOWN_RE.match(for_content)
+    if m:
+        comma_body, var_cond, var_step = m.groups()
+        if var_cond == var_step:
+            pre = ''
+            if comma_body:
+                pre_stmt = convert_expression(comma_body.strip())
+                pre = f'\n{indent}  {pre_stmt};'
+            return f'{indent}while {var_cond} <> 0 do begin{pre}'
+
+    # Fallback: emit as while loop comment
+    return f'{indent}{{ for loop: for ({for_content}) }}'
+
+
 def convert_function_body(body, strings_db, func_info, exe_reader=None):
     """Convert a C function body to Pascal statements.
 
@@ -118,6 +219,22 @@ def convert_function_body(body, strings_db, func_info, exe_reader=None):
             continue
 
         if 'bp_halt_handler' in stripped or '_Halt_q4Word' in stripped:
+            # Emit Halt and collect only the closing braces needed to
+            # balance the current nesting depth back to zero.
+            c_lines.append(('code', 'bp_halt();'))
+            depth = 0
+            for cl in c_lines:
+                if cl[0] == 'code':
+                    depth += cl[1].count('{') - cl[1].count('}')
+            for remaining in lines[i + 1:]:
+                rs = remaining.strip()
+                if rs == '}' or rs == '};':
+                    c_lines.append(('code', rs))
+                    depth -= 1
+                    if depth <= 0:
+                        break
+                elif '{' in rs:
+                    break  # New block opened after halt — stop
             break
 
         if is_noise_line(line):
@@ -298,10 +415,10 @@ def convert_c_line(line, func_info):
         neg_cond = negate_condition(cond)
         return f'{indent}until {neg_cond};'
 
-    # for loop — complex, emit as while
+    # for loop — try to convert to Pascal for/while
     for_match = re.match(r'^for\s*\((.+?)\)\s*\{?\s*$', line)
     if for_match:
-        return f'{indent}{{ for loop: {line} }}'
+        return _convert_for_loop(for_match.group(1), indent)
 
     # break
     if line == 'break;':
@@ -358,10 +475,33 @@ def convert_c_line(line, func_info):
         }
         if fname in skip_names:
             return None
+        if fname == 'bp_halt':
+            return f'{indent}Halt;'
+        # Library label → Pascal builtin
+        if fname in _LABEL_TO_PASCAL:
+            pascal_name = _LABEL_TO_PASCAL[fname]
+            args_match = re.search(r'\((.+)\)', line)
+            if args_match:
+                args = convert_expression(args_match.group(1))
+                return f'{indent}{pascal_name}({args});'
+            return f'{indent}{pascal_name};'
         # Skip FLIRT-identified system init/IO functions
         if re.match(r'^_(?:Halt|WriteLn|Write|ReadLn|Read|RunError)_q', fname):
             return f'{indent}{{ {line} }}'
         if fname.startswith('FUN_'):
+            # Write char function (FUN_xxxx_067b)
+            if re.match(r'FUN_\w+_067b$', fname):
+                args_match = re.search(r'\(\s*\d+\s*,\s*(\d+|0x[0-9a-f]+)', line)
+                if args_match:
+                    char_str = args_match.group(1)
+                    char_val = int(char_str, 16) if char_str.startswith('0x') else int(char_str)
+                    if 0x20 <= char_val <= 0x7e:
+                        return f"{indent}Write('{chr(char_val)}');"
+                    return f'{indent}Write(Chr({char_val}));'
+                return f"{indent}Write(' ');"
+            # Write Real function (FUN_xxxx_078a)
+            if re.match(r'FUN_\w+_078a$', fname):
+                return f'{indent}Write(0.0);'
             pascal_fname = 'Proc_' + fname[4:]
             args_match = re.search(r'\((.+)\)', line)
             if args_match:

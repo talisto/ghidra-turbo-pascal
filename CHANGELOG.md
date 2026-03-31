@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-03-30
+
+### Added
+- `pascal_emit/body_converter.py`: library label → Pascal builtin mapping (`_LABEL_TO_PASCAL`) for standalone calls: `bp_random→Random`, `bp_halt→Halt`, `bp_delay→Delay`, `bp_gotoxy→GotoXY`, `bp_clrscr→ClrScr`, `bp_readkey→ReadKey`, `bp_keypressed→KeyPressed`, `bp_textcolor→TextColor`, `bp_textbackground→TextBackground`, `bp_randomize→Randomize`, `bp_clreol→ClrEol`
+- `pascal_emit/expressions.py`: expression-side label mapping (`_EXPR_LABEL_MAP`) for `bp_random→Random`, `bp_chr→Chr`, `bp_ord→Ord`, `bp_length→Length`, `bp_copy→Copy`, `bp_pos→Pos`, `bp_concat→Concat`, `bp_upcase→UpCase`, `bp_sizeof→SizeOf`, `bp_keypressed→KeyPressed`, `bp_readkey→ReadKey`, `bp_eof→Eof`, `bp_eoln→Eoln`, etc.
+- `pascal_emit/pipeline.py`: cross-segment stub generation — functions referenced from other segments (CRT, overlay, etc.) now get empty procedure declarations with correct parameter signatures inferred from `functions.json`
+- `pascal_emit/body_converter.py`: `Halt;` emission when `bp_halt_handler` is encountered inside conditional blocks, with proper brace-depth tracking to close nesting correctly
+- `pascal_emit/expressions.py`: C pointer dereference `*variable` → `variable` conversion (consistent with `var` parameter semantics), with lookbehind guard to avoid matching multiplication
+- `pascal_emit/expressions.py`: C pointer cast `(type *)variable` → `variable` stripping for `int`, `uint`, `word`, `byte`, `char` pointer casts
+- `pascal_emit/expressions.py`: negative offset indexed access `*(type *)(param + -N)` → `param[-N]` conversion
+- `pascal_emit/write_sequences.py`: positional fallback for write_int value extraction when all DAT values are small constants (index 0=width, index 1=value)
+- `Decompile.java`: added offsets `0635` (bp_write_char) and `0670` (bp_write_str) to `BP_SYSTEM_CORE_LABELS` — covers binaries with and without Write(Char) in the system RTL
+
+### Fixed
+- `Decompile.java`: label dedup logic — offset-labeled functions now get rename priority over FLIRT labels; previously, a label appearing in both offset and FLIRT tables caused neither to be renamed (e.g., `bp_write_str` assigned by both offset match and FLIRT left `FUN_xxxx_0701` unlabeled)
+- `pascal_emit/types.py`: `char` now maps to `Byte` (not `Char`) — Ghidra uses `char` for byte-sized numeric variables, which causes FPC type mismatch errors when assigned to/from Byte globals
+- `pascal_emit/pipeline.py`: `cVar` temp variables now declared as `Byte` (not `Char`) — consistent with the `char→Byte` type mapping
+- `pascal_emit/types.py`: parameterless procedures no longer emit empty parentheses `procedure Name()` — FPC TP7 mode rejects this syntax
+- `pascal_emit/types.py`: inline `array[0..N] of T` types in parameter lists now map to `Pointer` — Pascal does not allow anonymous array types in parameter declarations
+- `pascal_emit/types.py`: expanded `C_TO_PASCAL_TYPE` with `int16→Integer`, `int32→LongInt`, `uint16→Word`, `uint32→LongInt`, `short→Integer`, `ushort→Word`; added array type expansion (`byte32` → `array[0..31] of Byte`)
+- `pascal_emit/pipeline.py`: globals declared only when referenced — removed hard `>= 0x50` offset filter and replaced with post-conversion reference-based filtering
+- `pascal_emit/body_converter.py`: for loop comma-body inclusive end value (Pascal `for` is inclusive, C `!=` means the end value IS reached)
+- `pascal_emit/expressions.py`: operator precedence for `and`/`or` — comparison sub-expressions are now parenthesized when joined by `and`/`or` (Pascal `and`/`or` bind tighter than comparisons)
+- `pascal_emit/write_sequences.py`: Write char (`FUN_xxxx_067b`) and Write Real (`FUN_xxxx_078a`) function recognition
+- `pascal_emit/write_sequences.py`: `undefined2` puVar pattern matching for stack push detection
+
+### Changed
+- FPC compilation: 8/16 test programs now compile with `fpc -Mtp` (HELLO, CONTROL, MATHOPS, EXITPROC, RANDTEST, TYPECAST, CRTTEST, OVRTEST), up from 4/16 previously
+
 ## [2.2.0] - 2026-03-30
 
 ### Fixed
@@ -178,7 +207,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `label_functions.py`: system segment detection now uses core offset counting instead of fixed markers (`3fca`/`3f65`) for broader compatibility
 - `label_functions.py`: FLIRT description table expanded with `t1`-style mangled names (e.g., `_GotoXY_q4Bytet1`)
 
-[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v1.2.2...v2.0.0

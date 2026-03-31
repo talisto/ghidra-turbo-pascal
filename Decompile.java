@@ -121,6 +121,8 @@ public class Decompile extends GhidraScript {
         {"03fa", "bp_writeln_impl",     "WriteLn implementation"},
         {"04ed", "bp_str_temp_read",    "Atomic read & clear temporary string pointer"},
         {"0627", "bp_read_setup",       "Read buffer setup"},
+        {"0635", "bp_write_char",       "Write(Text, Char, Word) — write char with field width"},
+        {"0670", "bp_write_str",        "Write(Text, String, Word) — write string"},
         {"0701", "bp_write_str",        "Write(Text, String, Word) — write string"},
         {"07bd", "bp_longint_mul",      "Longint multiply (32-bit on 16-bit)"},
         {"07d7", "bp_str_assign_const", "Assign string from constant"},
@@ -504,34 +506,44 @@ public class Decompile extends GhidraScript {
         // Build combined rename table with dedup (skip names used by >1 function)
         Map<String, String> renames = new HashMap<>();  // oldName → shortName
         Map<String, String> descriptions = new HashMap<>(); // oldName → description
-        Map<String, Integer> nameCount = new HashMap<>();
 
-        // Count short name usage (for dedup)
+        // Collect all label assignments by short name
+        Map<String, List<String>> offsetFuncsByLabel = new HashMap<>();
+        Map<String, List<String>> flirtFuncsByLabel = new HashMap<>();
         for (Map.Entry<String, String[]> e : functionLabels.entrySet()) {
             String shortName = e.getValue()[0];
-            nameCount.put(shortName, nameCount.getOrDefault(shortName, 0) + 1);
+            offsetFuncsByLabel.computeIfAbsent(shortName, k -> new ArrayList<>()).add(e.getKey());
         }
         for (Map.Entry<String, String[]> e : flirtLabels.entrySet()) {
             String shortName = e.getValue()[0];
-            nameCount.put(shortName, nameCount.getOrDefault(shortName, 0) + 1);
+            flirtFuncsByLabel.computeIfAbsent(shortName, k -> new ArrayList<>()).add(e.getKey());
         }
 
-        // Build rename + description maps (only unique names)
+        // Build rename + description maps
+        // When a label appears in both offset and FLIRT tables, the offset
+        // function gets the rename (FLIRT functions already have readable names).
+        // When a label appears multiple times in the same table, skip all.
         for (Map.Entry<String, String[]> e : functionLabels.entrySet()) {
             String shortName = e.getValue()[0];
             String desc = e.getValue()[1];
-            if (nameCount.getOrDefault(shortName, 0) == 1) {
+            descriptions.put(e.getKey(), desc);
+            List<String> offsetFuncs = offsetFuncsByLabel.getOrDefault(shortName, List.of());
+            List<String> flirtFuncs = flirtFuncsByLabel.getOrDefault(shortName, List.of());
+            if (offsetFuncs.size() == 1) {
+                // Unique within offset labels — rename it
                 renames.put(e.getKey(), shortName);
             }
-            descriptions.put(e.getKey(), desc);
         }
         for (Map.Entry<String, String[]> e : flirtLabels.entrySet()) {
             String shortName = e.getValue()[0];
             String desc = e.getValue()[1];
-            if (nameCount.getOrDefault(shortName, 0) == 1) {
+            descriptions.put(e.getKey(), desc);
+            List<String> offsetFuncs = offsetFuncsByLabel.getOrDefault(shortName, List.of());
+            List<String> flirtFuncs = flirtFuncsByLabel.getOrDefault(shortName, List.of());
+            if (flirtFuncs.size() == 1 && offsetFuncs.isEmpty()) {
+                // Unique within FLIRT and no offset conflict — rename it
                 renames.put(e.getKey(), shortName);
             }
-            descriptions.put(e.getKey(), desc);
         }
 
         // Build output with annotations, labels, and renames

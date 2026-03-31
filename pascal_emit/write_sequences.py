@@ -24,6 +24,15 @@ WRITELN_END_RE = re.compile(
 WRITE_END_RE = re.compile(
     r'(?:bp_flush_text_cond|bp_write(?!\w)|_Write_qm4Text)\s*\('
 )
+WRITE_CHAR_RE = re.compile(
+    r'FUN_\w+_067b\s*\('
+)
+WRITE_CHAR_ARGS_RE = re.compile(
+    r'FUN_\w+_067b\s*\(\s*\d+\s*,\s*(\d+|0x[0-9a-f]+)\s*(?:,|\))'
+)
+WRITE_REAL_RE = re.compile(
+    r'FUN_\w+_078a\s*\('
+)
 STRING_ANNOTATION_RE = re.compile(r'/\*\s*"((?:[^"\\]|\\.)*)"\s*\*/')
 
 WRITE_INT_ARGS_RE = re.compile(
@@ -74,6 +83,7 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
         """Check if a line is a stack push (DAT_, puVar, or *puVar assignment)."""
         return (line.startswith('DAT_') or
                 line.startswith('*(word *)(puVar') or
+                line.startswith('*(undefined') or
                 bool(re.match(r'puVar\d+\[-?\d+\]\s*=', line)) or
                 bool(re.match(r'\*puVar\d+\s*=', line)))
 
@@ -170,11 +180,34 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
                         else:
                             parts.append(value)
                     else:
-                        val = _find_dat_value(lines, j)
-                        if val:
-                            parts.append(convert_expression(val))
+                        # No explicit args — try DAT_/puVar push pattern
+                        val_expr, val_width = _extract_longint_value(dat_values)
+                        if val_expr:
+                            converted = convert_expression(val_expr)
+                            if val_width > 0:
+                                parts.append(f'{converted}:{val_width}')
+                            else:
+                                parts.append(converted)
+                        elif len(dat_values) >= 2:
+                            # Positional fallback: [0]=width, [1]=value
+                            try:
+                                w = dat_values[0].strip()
+                                v = dat_values[1].strip()
+                                val_width = int(w, 16) if w.startswith('0x') else int(w)
+                                converted = convert_expression(v)
+                                if val_width > 0:
+                                    parts.append(f'{converted}:{val_width}')
+                                else:
+                                    parts.append(converted)
+                            except (ValueError, IndexError):
+                                parts.append('{int}')
                         else:
-                            parts.append('{int}')
+                            val = _find_dat_value(lines, j)
+                            if val:
+                                parts.append(convert_expression(val))
+                            else:
+                                parts.append('{int}')
+                dat_values.clear()
                 j += 1
                 continue
 
@@ -202,6 +235,42 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
                             parts.append(converted)
                     else:
                         parts.append('{longint}')
+                dat_values.clear()
+                j += 1
+                continue
+
+            # Write char part (FUN_xxxx_067b)
+            if WRITE_CHAR_RE.search(jline):
+                found_write = True
+                m_args = WRITE_CHAR_ARGS_RE.search(jline)
+                if m_args:
+                    # Explicit args: FUN_xxxx_067b(0, charval)
+                    char_str = m_args.group(1)
+                    char_val = int(char_str, 16) if char_str.startswith('0x') else int(char_str)
+                else:
+                    # No explicit args — char is in DAT_ stack pushes
+                    char_val = None
+                    if dat_values:
+                        # Char value is usually the last DAT_ before segment/offset pairs
+                        for dv in reversed(dat_values):
+                            try:
+                                v = int(dv, 16) if dv.startswith('0x') else int(dv)
+                                if 0x20 <= v <= 0x7e:
+                                    char_val = v
+                                    break
+                            except ValueError:
+                                continue
+                    if char_val is None:
+                        char_val = 0x20  # Default to space
+                parts.append(f"'{chr(char_val)}'")
+                dat_values.clear()
+                j += 1
+                continue
+
+            # Write Real part (FUN_xxxx_078a)
+            if WRITE_REAL_RE.search(jline):
+                found_write = True
+                parts.append('0.0')
                 dat_values.clear()
                 j += 1
                 continue
@@ -282,7 +351,7 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
                 continue
 
             # puVar stack push lines
-            if (re.match(r'\*\(word \*\)\(puVar\d+ \+ -', jline) or
+            if (re.match(r'\*\((?:word|undefined[124]) \*\)\(puVar\d+ \+ -', jline) or
                     re.match(r'puVar\d+\[-?\d+\]\s*=', jline) or
                     re.match(r'\*puVar\d+\s*=', jline)):
                 ann = extract_string_annotation(jline)
@@ -304,7 +373,7 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
                 continue
 
             # *(int *) puVar cast lines (integer write setup)
-            if re.match(r'\*\((?:int|uint) \*\)\(puVar\d+ \+ -', jline):
+            if re.match(r'\*\((?:int|uint|undefined[124]) \*\)\(puVar\d+ \+ -', jline):
                 pv_match = re.search(r'=\s*(.+?)\s*;', jline)
                 if pv_match:
                     dat_values.append(pv_match.group(1).strip())

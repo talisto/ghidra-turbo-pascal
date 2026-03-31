@@ -166,7 +166,7 @@ _TEMP_VAR_RE = re.compile(r'\b([iucb]Var\d+)\b')
 _TEMP_VAR_TYPES = {
     'i': 'Integer',
     'u': 'Word',
-    'c': 'Char',
+    'c': 'Byte',
     'b': 'Byte',
 }
 
@@ -322,10 +322,6 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
 
     # Detect global variables
     globals_map = _detect_globals(processed_bodies)
-    globals_map = OrderedDict(
-        (k, v) for k, v in globals_map.items()
-        if int(k, 16) >= 0x50
-    )
 
     # Convert application functions
     pascal_funcs = []
@@ -404,8 +400,49 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
             if temp_name not in global_names:
                 main_temps.append((temp_name, temp_type))
 
+    # Filter globals: only keep those actually referenced in converted Pascal
+    all_pascal_text = main_body
+    for func in pascal_funcs:
+        all_pascal_text += '\n' + func['body']
+    referenced_globals = OrderedDict(
+        (k, v) for k, v in globals_map.items()
+        if f'g_{k[2:].zfill(4).upper()}' in all_pascal_text
+    )
+
+    # Generate stubs for cross-segment Proc_ references not declared
+    declared_procs = {f['pascal_name'] for f in pascal_funcs}
+    proc_refs = set(re.findall(r'\bProc_[0-9a-fA-F]+_[0-9a-fA-F]+\b', all_pascal_text))
+    undeclared_procs = sorted(proc_refs - declared_procs)
+
+    # Build lookup from FUN_/Proc_ name to IR function for parameter info
+    ir_by_name = {}
+    for fn in ir_functions:
+        name = fn.get('name', '')
+        if name.startswith('FUN_'):
+            ir_by_name['Proc_' + name[4:]] = fn
+
+    stub_funcs = []
+    for pname in undeclared_procs:
+        # Check if ANY call site passes arguments (look for 'Proc_name(')
+        has_args_call = re.search(re.escape(pname) + r'\s*\(', all_pascal_text)
+        ir_fn = ir_by_name.get(pname)
+        if has_args_call and ir_fn:
+            params = _extract_params(ir_fn)
+            # Force procedure (not function) for stubs — body converter uses Proc_ prefix
+            _, decl, _, _ = make_pascal_signature('void', ir_fn['name'], params)
+        else:
+            decl = f'procedure {pname};'
+        stub_funcs.append({
+            'declaration': decl,
+            'body': '  { cross-segment stub }',
+            'is_function': False,
+            'pascal_name': pname,
+            'local_vars': [],
+        })
+    pascal_funcs = stub_funcs + pascal_funcs
+
     # Emit
-    pascal_text = emit_pascal(program_name, uses, globals_map, pascal_funcs,
+    pascal_text = emit_pascal(program_name, uses, referenced_globals, pascal_funcs,
                               main_body, main_temps)
 
     # Determine output path
