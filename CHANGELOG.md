@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-03-31
+
+### Added
+- `pascal_emit/write_sequences.py`: extended `WRITE_REAL_RE` to match `bp_write_real` and `_Write_qm4Text4Real` — real-number writes now participate in Write/WriteLn sequence merging instead of being emitted as standalone comments
+- `pascal_emit/write_sequences.py`: extended `WRITE_CHAR_RE` and `WRITE_CHAR_ARGS_RE` to match `bp_write_char`, `bp_write_char_buf`, and `_Write_qm4Text4Char` — character writes (including space separators) now merge into Write sequences
+
+### Changed
+- MATHOPS: 1 → 0 commented lines — now fully clean output; `WriteLn('355/113 = ', 0.0)` instead of separate `{ bp_write_real(); }` comment
+- PTRMEM: 15 → 14 commented lines (-1); `Write(local_6, ' ')` merges char-buf space separator into Write call
+- FILEIO: 23 → 22 commented lines (-1)
+- 6 programs now produce fully clean output with 0 commented lines
+
 ## [2.20.0] - 2026-03-31
 
 ### Added

@@ -53,13 +53,13 @@ WRITE_END_RE = re.compile(
     r'(?:bp_flush_text_cond|bp_write(?!\w)|_Write_qm4Text)\s*\('
 )
 WRITE_CHAR_RE = re.compile(
-    r'FUN_\w+_067b\s*\('
+    r'(?:bp_write_char(?:_buf)?|_Write_qm4Text4Char|FUN_\w+_067b)\s*\('
 )
 WRITE_CHAR_ARGS_RE = re.compile(
-    r'FUN_\w+_067b\s*\(\s*\d+\s*,\s*(\d+|0x[0-9a-f]+)\s*(?:,|\))'
+    r'(?:bp_write_char(?:_buf)?|_Write_qm4Text4Char|FUN_\w+_067b)\s*\(\s*\d+\s*,\s*(\d+|0x[0-9a-f]+)\s*(?:,|\))'
 )
 WRITE_REAL_RE = re.compile(
-    r'FUN_\w+_078a\s*\('
+    r'(?:bp_write_real|_Write_qm4Text4Real|FUN_\w+_078a)\s*\('
 )
 WRITE_BOOL_RE = re.compile(
     r'(?:bp_write_bool|_Write_qm4Text7Boolean4Word)\s*\('
