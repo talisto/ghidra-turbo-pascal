@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-03-30
+
 ### Changed
 - `pascal_emit/expressions.py`: refactored `_convert_atomic_condition` to split on comparison operators and delegate each operand to `convert_expression` — eliminates ~50 lines of duplicated conversion logic and fixes missing sub-field accessor conversion (`var._1_1_` → `Byte(var)`) in conditions
 - `tests/test_fpc_compilation.py`: DDTEST moved from expected failures to compiling programs (12/16 now compile, 75%)
@@ -267,7 +269,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `label_functions.py`: system segment detection now uses core offset counting instead of fixed markers (`3fca`/`3f65`) for broader compatibility
 - `label_functions.py`: FLIRT description table expanded with `t1`-style mangled names (e.g., `_GotoXY_q4Bytet1`)
 
-[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.9.0...HEAD
+[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.10.0...HEAD
+[2.10.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.6.0...v2.7.0
