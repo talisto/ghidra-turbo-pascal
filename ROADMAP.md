@@ -2,7 +2,7 @@
 
 > A prioritized plan for producing working Turbo Pascal 7 source files from Ghidra-decompiled DOS MZ executables. The goal is not byte-identical reproduction — it's **functional Pascal programs** that compile with TP7/FPC and produce the same observable behavior as the original.
 
-## Current State (v2.24.0)
+## Current State (v2.25.0+)
 
 | Capability | Status |
 |------------|--------|
@@ -10,8 +10,8 @@
 | FLIRT + hash-based RTL function labeling (~90 signatures) | ✅ Complete |
 | Single-pass headless decompilation pipeline | ✅ Complete |
 | Overlay (.OVR) loading | ✅ Complete |
-| 16 test binaries with full pytest coverage | ✅ Complete (659 tests) |
-| C-to-Pascal transpiler (`pascal_emit/`) | ✅ Functional — 14/16 compile |
+| 16 test binaries with full pytest coverage | ✅ Complete (660 tests) |
+| C-to-Pascal transpiler (`pascal_emit/`) | ✅ Functional — 15/16 compile |
 | Library code elimination in decompiled output | ✅ Complete |
 | Artifact cleanup (CONCAT11, unaff_DS, calling conventions) | ✅ Complete |
 | BP7 type definitions registered in Ghidra (TextRec, FileRec, etc.) | ✅ Registered (not yet applied) |
@@ -28,60 +28,66 @@
 | Array element assignment conversion | ✅ Complete |
 | Func_() placeholder args in WriteLn | ✅ Complete |
 | DDPlus library function conversion | ✅ Complete (16 functions + string resolution) |
-| String concatenation sequence merging | ✅ Complete (bp_delete + bp_str_append → Concat) |
+| String concatenation sequence merging | ✅ Complete (bp_delete + bp_str_append → Concat; bp_str_assign + bp_concat → assignment) |
+| Integer-to-string conversion (Str) | ✅ Complete (bp_str_long → Str(value, dest)) |
+| Array global auto-detection | ✅ Complete (g_XXXX[expr] indexing → array type) |
+| Pointer arithmetic array access | ✅ Complete (*(type *)(var * 2 + BASE) → g_BASE[var]) |
 
-### Current Pascal Output Quality (v2.24.0)
+### Current Pascal Output Quality (v2.25.0+)
 
 Assessed against 16 test programs with known original source:
 
 | Metric | Value |
 |--------|-------|
-| Programs that compile (FPC -Mtp -Sc) | **14/16** (87.5%) |
-| Programs **successfully transpiled** (compile + 0 non-stub commented lines) | **9/16** (56.25%) |
-| Total commented lines (non-stub) | **79** across all programs |
+| Programs that compile (FPC -Mtp -Sc) | **15/16** (93.75%) |
+| Programs **successfully transpiled** (compile + 0 non-stub commented lines) | **11/16** (68.75%) |
+| Total commented lines (non-stub) | **30** across all programs |
+| Total `{???}` string placeholders | **19** across all programs |
 
 **Quality tier breakdown:**
 
 | Tier | Programs | Count |
 |------|----------|-------|
-| **Clean** (compiles, 0 non-stub commented lines) | CONTROL, CRTTEST, DDTEST, EXITPROC, GAMESIM, HELLO, MATHOPS, OVRTEST, TYPECAST | 9 |
-| **Incomplete** (compiles, but has commented-out code = missing functionality) | DOSTEST(18), PROCFUNC(5), PTRMEM(8), RANDTEST(1), RECORDS(7), STRINGS(25) | 6 |
-| **Broken** (does not compile) | DDTEST(ddplus unit), FILEIO(15) | 2 |
+| **Clean** (compiles, 0 non-stub commented lines) | CONTROL, CRTTEST, DDTEST, EXITPROC, GAMESIM, HELLO, MATHOPS, OVRTEST, RANDTEST, TYPECAST | 10 |
+| **Incomplete** (compiles, but has commented-out code = missing functionality) | DOSTEST(2), FILEIO(1), PROCFUNC(5), PTRMEM(7), RECORDS(5), STRINGS(10) | 6 |
+| **Broken** (does not compile) | DDTEST(ddplus unit) | 1 |
 
-> **Note**: DDTEST has 0 commented lines (Clean tier) but cannot compile with FPC because it requires the external `ddplus` unit. FILEIO has unresolved file I/O operations.
+> **Note**: DDTEST has 0 commented lines (Clean tier) but cannot compile with FPC because it requires the external `ddplus` unit. It is counted as Clean for transpilation quality.
+
+### Remaining Commented Line Categories
+
+All 30 remaining commented lines represent fundamentally untranslatable C constructs:
+
+| Category | Lines | Description |
+|----------|-------|-------------|
+| Leaked Ghidra identifiers | 13 | `puVar`, `extraout_`, `unaff_`, `func_0x` — register artifacts and temp variables |
+| Scalar-to-array aliasing | 6 | `iVar := Integer(param_N)` where iVar is also used as array — pointer aliasing |
+| C pointer casts/dereferences | 4 | `*(type *)expr`, `((type *)x)[N]` — no Pascal equivalent |
+| Nested scope access | 2 | `param_1[6]` — frame pointer access to enclosing procedure variables |
+| Orphaned structural keywords | 5 | `Break`, `end;` — consequences of other lines being commented out |
 
 | Area | Status | Notes |
 |------|--------|-------|
 | Trivial programs (WriteLn only) | ✅ Works | HELLO.pas compiles and runs |
-| Global variables | ✅ Working | Named as `g_XXXX`, auto-typed (Integer/Word/Byte/String[N]) |
+| Global variables | ✅ Working | Named as `g_XXXX`, auto-typed (Integer/Word/Byte/String[N]/Array) |
 | WriteLn/Write sequences | ✅ Working | Str, Int, LongInt, Char, Real, Bool merged into Write calls |
 | Arithmetic operators | ✅ Fixed | `div`, `mod`, `and`, `or`, `xor`, `not`, `shl`, `shr` |
 | Bitwise/logical operators | ✅ Fixed | `and`/`or`/`xor`/`not`/`shl`/`shr` converted |
 | For loops | ✅ Fixed | Counting loops converted to `for..to/downto` |
 | Case statements | ✅ Fixed | `if/else if` chains → `case...of` with ranges |
 | DDPlus library functions | ✅ Working | 16 functions with string resolution and char conversion |
-| String concatenation sequences | ✅ Working | bp_delete + bp_str_append → swriteln('s' + g_XXXX) |
-| String operations | ❌ Non-functional | String type lost; Concat/Copy/Pos/Length/Delete/Insert are raw calls |
-| Record types | ❌ Not recovered | Field access as `*(int *)(ptr + 0x15)` |
+| String concatenation sequences | ✅ Working | bp_delete + bp_str_append → swriteln('s' + g_XXXX); bp_str_assign + bp_concat → g_DEST := 'literal' + g_SRC |
+| Integer-to-string conversion | ✅ Working | bp_str_long → Str(value, dest) |
+| Array global auto-detection | ✅ Working | g_XXXX[expr] indexing auto-declares as array type |
+| String operations | ❌ Partial | Concat sequence merging works; Copy/Pos/Length/Delete/Insert still raw calls |
+| Record types | ❌ Not recovered | Field access as `*(int *)(ptr + 0x15)` — pointer aliasing unfixable |
 | Nested procedures | ❌ Not recovered | Flattened to separate procedures with frame pointer params |
-| File I/O | ❌ Non-functional | Assign/Reset/Rewrite/ReadLn are unresolved FUN_xxxx calls |
+| File I/O | ⚠️ Partial | Assign/Reset/Rewrite/Close work; Seek/Read/Write via unresolved FUN_ calls |
 | Type casts | ✅ Fixed | `(ulong)x` → `LongInt(x)`, `(uint)x` → `Word(x)`, etc. |
-| 32-bit arithmetic | ❌ Broken | LongInt operations decomposed to 16-bit carry pairs |
+| 32-bit arithmetic | ⚠️ Partial | CARRY2 conversion works; some decomposed patterns remain |
 | Undeclared variables | ✅ Fixed | `iVar1`, `uVar5` auto-declared with inferred types |
-| WriteLn longint values | ✅ Fixed | Values extracted from stack push patterns |
-| Array types | ❌ Not recovered | Array access as pointer arithmetic |
+| Array types | ⚠️ Partial | Pointer arithmetic to arrays works; record-as-array aliasing unfixable |
 | CRT functions | ✅ Working | WhereX, WhereY, GotoXY, TextAttr, ReadKey, KeyPressed |
-| Case statements | ✅ Fixed | `if/else if` chains reconstructed to `case...of` with ranges |
-| String operations | ❌ Non-functional | String type lost; Concat/Copy/Pos/Length/Delete/Insert are raw calls |
-| Record types | ❌ Not recovered | Field access as `*(int *)(ptr + 0x15)` |
-| Nested procedures | ❌ Not recovered | Flattened to separate procedures with frame pointer params |
-| File I/O | ❌ Non-functional | Assign/Reset/Rewrite/ReadLn are unresolved FUN_xxxx calls |
-| Function return values | ❌ Broken | C `return` not always converted to `FuncName := value` |
-| Type casts | ✅ Fixed | `(ulong)x` → `LongInt(x)`, `(uint)x` → `Word(x)`, etc. |
-| 32-bit arithmetic | ❌ Broken | LongInt operations decomposed to 16-bit carry pairs |
-| Undeclared variables | ✅ Fixed | `iVar1`, `uVar5` auto-declared with inferred types |
-| WriteLn longint values | ✅ Fixed | Values extracted from stack push patterns, no more `{longint}` |
-| Array types | ❌ Not recovered | Array access as pointer arithmetic |
 
 ---
 
