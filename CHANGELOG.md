@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `pascal_emit/body_converter.py`: orphaned `end;` detection and commenting — when `_sanitize_ghidra_artifacts` comments out a line containing `begin` (e.g., `if ... then begin` with leaked identifiers), the matching `end;` is now also commented out to prevent structural imbalances. Handles `case ... of` and compound lines like `end else if ... then begin`
+- `pascal_emit/body_converter.py`: expanded leaked identifier patterns — now catches `DAT_XXXX_XXXX` (data references), `FUN_XXXX_XXXX` (unlabeled function calls), and `dos_*` (undeclared DOS unit functions) in addition to existing patterns
+
+### Changed
+- `pascal_emit/types.py`: large `undefinedN` types (N > 8) now map to `array[0..N-1] of Byte` instead of producing invalid type names
+- `pascal_emit/pipeline.py`: `_postprocess_ccode` now cleans up large `undefinedN` type references; `_extract_params` regex fixed to handle multi-digit undefined types
+- `pascal_emit/write_sequences.py`: `WRITE_LONGINT_ARGS_RE` now accepts optimized sign-extension argument (e.g., `0` instead of `value >> 0xf` for small positive values)
+- `tests/test_fpc_compilation.py`: DOSTEST and STRINGS moved from expected failures to compiling programs (10/16 now compile)
+
+### Fixed
+- `pascal_emit/expressions.py`: strip `unaff_*` leaked register names from function call arguments; handle sub-field accessor syntax (`var._1_1_` → `Byte(var)`); strip `&stack0x*` references; fix double-`and` operator; add `bp_ioresult→IOResult` expression mapping
+- `pascal_emit/body_converter.py`: add `bp_ioresult→IOResult` to label-to-Pascal mapping; add noise patterns for leaked Ghidra identifiers in active code lines
+
 ## [2.4.0] - 2026-03-30
 
 ### Added

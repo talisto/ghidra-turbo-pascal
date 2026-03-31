@@ -43,9 +43,10 @@ WRITE_INT_ARGS_SIMPLE_RE = re.compile(
 )
 # Extract args from explicit-argument longint write calls:
 # _Write_qm4Text7Longint4Word(width, value, value >> 0xf)
+# The third arg may be optimized to 0 for small positive values.
 WRITE_LONGINT_ARGS_RE = re.compile(
     r'(?:bp_write_longint|bp_write7Longint4Word|_Write_qm4Text7Longint4Word)'
-    r'\s*\(\s*(\d+)\s*,\s*(.+?)\s*,\s*.+?>>\s*(?:0xf|15)\s*\)'
+    r'\s*\(\s*(\d+)\s*,\s*(.+?)\s*,\s*[^)]+\s*\)'
 )
 
 DAT_VALUE_RE = re.compile(r'DAT_\w+ = (\*\(int \*\)0x[0-9a-f]+)')

@@ -33,6 +33,13 @@ def c_type_to_pascal(ctype):
         size = int(m.group(2))
         if base:
             return f'array[0..{size - 1}] of {base}'
+    # Handle Ghidra large undefined types: undefined132, undefined232, etc.
+    m = re.match(r'^undefined(\d+)$', ctype)
+    if m:
+        size = int(m.group(1))
+        if size <= 8:
+            return C_TO_PASCAL_TYPE.get(ctype, ctype)
+        return f'array[0..{size - 1}] of Byte'
     return C_TO_PASCAL_TYPE.get(ctype, ctype)
 
 

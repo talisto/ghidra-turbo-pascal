@@ -19,6 +19,7 @@ _LABEL_TO_PASCAL = {
     'bp_clreol': 'ClrEol',
     'bp_textcolor': 'TextColor',
     'bp_textbackground': 'TextBackground',
+    'bp_ioresult': 'IOResult',
 }
 
 
@@ -63,6 +64,19 @@ NOISE_PATTERNS = [
     re.compile(r'^\s*byte \*puVar'),
     re.compile(r'^\s*word \*puVar'),
     re.compile(r'^\s*\w+Var\d+\s*=\s*\*\(.*puVar'),
+    # Leaked Ghidra identifiers in active code
+    re.compile(r'^\s*(?:p[bui]Var\d+|abStack_\w+)\s*[=\[]'),
+    re.compile(r'^\s*\*\s*(?:p[bui]Var\d+|abStack_\w+)'),
+    re.compile(r'^\s*(?:byte|word|int)\s+(?:p[bui]Var|pbVar|abStack_)'),
+    # extraout_ assignments
+    re.compile(r'^\s*extraout_\w+\s*='),
+    # CARRY artifacts from 32-bit arithmetic
+    re.compile(r'^\s*\w+\s*=\s*.*CARRY\d'),
+    re.compile(r'^\s*CARRY\d'),
+    # func_0x references (raw Ghidra func pointers)
+    re.compile(r'^\s*func_0x[0-9a-f]+\s*\('),
+    # DAT_ with direct dereference in assignment context
+    re.compile(r'^\s*DAT_\w+\s*=\s*DAT_'),
 ]
 
 
@@ -616,10 +630,104 @@ def convert_function_body(body, strings_db, func_info, exe_reader=None):
     while result and not result[-1].strip():
         result.pop()
 
+    # Phase 4.5: Sanitize leaked Ghidra identifiers
+    result = _sanitize_ghidra_artifacts(result)
+
     # Phase 5: Reconstruct case statements from if/else if chains
     result = _reconstruct_case_statements(result)
 
     return '\n'.join(result) if result else '  { empty }'
+
+
+# Patterns for identifiers that must not appear in active Pascal code
+_LEAKED_IDENT_RE = re.compile(
+    r'\b(?:p[bui]Var\d+|abStack_\w+|CARRY\d|func_0x[0-9a-f]+|'
+    r'extraout_\w+|stack0x[0-9a-f]+|DAT_[0-9a-f_]+|FUN_[0-9a-f_]+|'
+    r'dos_\w+)\b',
+    re.IGNORECASE
+)
+
+
+def _sanitize_ghidra_artifacts(lines):
+    """Comment out lines containing leaked Ghidra identifiers.
+
+    Lines that reference undeclared Ghidra variables (puVar, pbVar,
+    abStack, CARRY, func_0x, extraout_, stack0x) are wrapped in comments
+    unless they're already inside a comment.
+
+    When commenting out a line that opens a begin/end block, the matching
+    end is also commented out to prevent orphaned structural keywords.
+    """
+    result = []
+    for line in lines:
+        stripped = line.strip()
+        # Skip lines already commented out
+        if stripped.startswith('{') and stripped.endswith('}'):
+            result.append(line)
+            continue
+        # Skip structural keywords
+        if stripped in ('begin', 'end;', 'end.', 'repeat', '') or stripped.startswith('end '):
+            result.append(line)
+            continue
+        # Check for leaked identifiers
+        if _LEAKED_IDENT_RE.search(stripped):
+            indent = line[:len(line) - len(line.lstrip())]
+            result.append(f'{indent}{{ {stripped} }}')
+        else:
+            result.append(line)
+
+    # Second pass: comment out orphaned end; keywords whose matching begin
+    # was commented out.  Track depth from lines that are NOT comments.
+    result = _fix_orphaned_ends(result)
+    return result
+
+
+def _fix_orphaned_ends(lines):
+    """Comment out end; lines that have no matching begin.
+
+    Scans active (non-comment) lines tracking begin/end depth.  When an
+    ``end;`` would drive depth negative (no matching ``begin``), it is
+    wrapped in a comment.  ``case ... of`` counts as an implicit block
+    opener since it requires a closing ``end;`` without a ``begin``.
+
+    Lines like ``end else if ... then begin`` count as both a block close
+    and a block open.
+    """
+    depth = 0
+    result = []
+    for line in lines:
+        stripped = line.strip()
+        is_comment = stripped.startswith('{') and stripped.endswith('}')
+        if is_comment or not stripped:
+            result.append(line)
+            continue
+
+        # Count end keywords (standalone end; or end at start of compound line)
+        has_begin = bool(re.search(r'\bbegin\b', stripped)) or stripped == 'repeat'
+        has_case = bool(re.search(r'\bcase\b.*\bof\b', stripped))
+        is_standalone_end = stripped == 'end;'
+        # "end else ..." or "end;" at start of a line with more content
+        has_end = is_standalone_end or stripped.startswith('end ')
+
+        if is_standalone_end and not has_begin:
+            # Pure end; line
+            if depth <= 0:
+                indent = line[:len(line) - len(line.lstrip())]
+                result.append(f'{indent}{{ {stripped} }}')
+                continue
+            else:
+                depth -= 1
+        else:
+            # Process end before begin on compound lines like "end else begin"
+            if has_end:
+                depth -= 1
+                if depth < 0:
+                    depth = 0
+            if has_begin or has_case:
+                depth += 1
+
+        result.append(line)
+    return result
 
 
 def convert_c_line(line, func_info):

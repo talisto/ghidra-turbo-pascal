@@ -19,3 +19,4 @@ __pycache__/
 
 # Debug/diagnostic scripts (not part of the decompiler)
 debug/
+debug_case.py

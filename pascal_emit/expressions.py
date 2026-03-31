@@ -62,6 +62,17 @@ def convert_expression(expr):
     expr = re.sub(r'CONCAT11\s*\(\s*extraout_AH\s*,\s*([^)]+)\)', r'\1', expr)
     expr = re.sub(r'CONCAT22\s*\(\s*[^,]+\s*,\s*([^)]+)\)', r'\1', expr)
 
+    # Strip unaff_* arguments from call argument lists
+    expr = re.sub(r',\s*unaff_\w+', '', expr)
+    expr = re.sub(r'unaff_\w+\s*,\s*', '', expr)
+
+    # Strip Ghidra sub-field accessors: var._1_1_ → Byte(var)
+    expr = re.sub(r'(\w+)\._\d+_\d+_', r'Byte(\1)', expr)
+
+    # Strip &stack references: &stack0xNNNN → 0 { stack ref }
+    expr = re.sub(r'and\s+stack0x[0-9a-f]+', '0 { stack ref }', expr)
+    expr = re.sub(r'&stack0x[0-9a-f]+', '0 { stack ref }', expr)
+
     # Library label function calls → Pascal builtins (in expressions)
     _EXPR_LABEL_MAP = {
         'bp_random': 'Random', 'bp_randomize': 'Randomize',
@@ -73,6 +84,7 @@ def convert_expression(expr):
         'bp_keypressed': 'KeyPressed', 'bp_readkey': 'ReadKey',
         'bp_filepos': 'FilePos', 'bp_filesize': 'FileSize',
         'bp_eof': 'Eof', 'bp_eoln': 'Eoln',
+        'bp_ioresult': 'IOResult',
     }
     for old, new in _EXPR_LABEL_MAP.items():
         expr = re.sub(r'\b' + re.escape(old) + r'\b', new, expr)
@@ -111,6 +123,10 @@ def convert_expression(expr):
 
     # Clean up whitespace
     expr = re.sub(r'\s+', ' ', expr).strip()
+
+    # Fix doubled operators from stripping (e.g., "and and" → "and")
+    expr = re.sub(r'\band\s+and\b', 'and', expr)
+    expr = re.sub(r'\bor\s+or\b', 'or', expr)
 
     return expr
 

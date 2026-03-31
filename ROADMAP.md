@@ -283,10 +283,10 @@ The entry function contains system initialization code (runtime init, I/O init, 
 
 **Status**: Complete — `tests/test_fpc_compilation.py` automatically compiles all generated `.pas` files with `fpc -Mtp` (Turbo Pascal mode). Regression protection for 8 currently-compiling programs, expected-failure tracking for 8 programs with known issues. Run with `pytest tests/test_fpc_compilation.py -v`.
 
-**Current compilation scorecard** (8/16 = 50%):
+**Current compilation scorecard** (10/16 = 62.5%):
 | Compiles | Fails |
 |----------|-------|
-| HELLO, CONTROL, MATHOPS, CRTTEST, RANDTEST, TYPECAST, EXITPROC, OVRTEST | PROCFUNC, GAMESIM, STRINGS, DOSTEST, FILEIO, RECORDS, PTRMEM, DDTEST |
+| HELLO, CONTROL, MATHOPS, CRTTEST, RANDTEST, TYPECAST, EXITPROC, OVRTEST, STRINGS, DOSTEST | PROCFUNC, GAMESIM, FILEIO, RECORDS, PTRMEM, DDTEST |
 
 ### 5.2 Behavioral Comparison Testing
 

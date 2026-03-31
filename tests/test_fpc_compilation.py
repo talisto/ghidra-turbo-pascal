@@ -47,24 +47,24 @@ def get_all_pas_programs():
 COMPILING_PROGRAMS = {
     'CONTROL',
     'CRTTEST',
+    'DOSTEST',
     'EXITPROC',
     'HELLO',
     'MATHOPS',
     'OVRTEST',
     'RANDTEST',
+    'STRINGS',
     'TYPECAST',
 }
 
 # Programs that are expected to fail (not yet fixed)
 EXPECTED_FAILURES = {
     'DDTEST',
-    'DOSTEST',
     'FILEIO',
     'GAMESIM',
     'PROCFUNC',
     'PTRMEM',
     'RECORDS',
-    'STRINGS',
 }
 
 

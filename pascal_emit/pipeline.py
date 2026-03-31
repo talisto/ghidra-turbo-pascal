@@ -71,6 +71,14 @@ def _apply_renames(text, renames):
     return text
 
 
+def _replace_undefined_large(m):
+    """Replace undefinedN with array type for N > 8."""
+    size = int(m.group(1))
+    if size <= 8:
+        return m.group(0)  # already handled above
+    return f'array[0..{size - 1}] of Byte'
+
+
 def _postprocess_ccode(ccode, renames, strings_db):
     """Apply Phase-5-style post-processing to raw cCode from functions.json.
 
@@ -92,6 +100,8 @@ def _postprocess_ccode(ccode, renames, strings_db):
     text = re.sub(r'\bundefined2\b', 'word', text)
     text = re.sub(r'\bundefined4\b', 'dword', text)
     text = re.sub(r'\bundefined8\b', 'qword', text)
+    # Large undefined types (e.g., undefined132 = 132-byte struct)
+    text = re.sub(r'\bundefined(\d+)\b', _replace_undefined_large, text)
 
     # 3. Calling convention removal
     text = text.replace('__cdecl16near ', '')
@@ -242,7 +252,10 @@ def _extract_params(fn):
         is_ptr = '*' in ptype
         # Clean up type: remove pointer asterisk, map Ghidra types
         clean_type = ptype.replace(' *', '').replace('*', '').strip()
-        clean_type = re.sub(r'^undefined\d?$', 'int', clean_type)
+        # Only map small undefined types (undefined, undefined1-8) to int
+        # Large ones (undefined132, undefined232) are handled by c_type_to_pascal
+        if re.match(r'^undefined\d?$', clean_type):
+            clean_type = 'int'
         params.append((clean_type, pname, is_ptr))
     return params
 
