@@ -584,6 +584,40 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
         sorted(referenced_globals.items(), key=lambda x: int(x[0], 16))
     )
 
+    # Detect globals that receive string assignments and retype them
+    _STR_ASSIGN_RE = re.compile(
+        r"\{ (g_[0-9A-F]{4}) := '([^']*)'; \}")
+    string_globals = {}  # g_XXXX → max string length
+    for m in _STR_ASSIGN_RE.finditer(all_pascal_text):
+        gname = m.group(1)
+        slen = len(m.group(2))
+        if gname not in string_globals or slen > string_globals[gname]:
+            string_globals[gname] = slen
+    if string_globals:
+        for offset in list(referenced_globals):
+            gname = f'g_{offset[2:].zfill(4).upper()}'
+            if gname in string_globals:
+                slen = max(string_globals[gname], 1)
+                referenced_globals[offset] = f'String[{slen}]'
+        # Uncomment string assignments in function bodies and main body
+        def _uncomment_str_assigns(text, str_globals):
+            lines = text.split('\n')
+            out = []
+            for line in lines:
+                m = _STR_ASSIGN_RE.search(line)
+                if m and m.group(1) in str_globals:
+                    # Remove { } comment wrapper
+                    indent = len(line) - len(line.lstrip())
+                    out.append(' ' * indent + m.group(1) +
+                               " := '" + m.group(2) + "';")
+                else:
+                    out.append(line)
+            return '\n'.join(out)
+        main_body = _uncomment_str_assigns(main_body, string_globals)
+        for func in pascal_funcs:
+            func['body'] = _uncomment_str_assigns(
+                func['body'], string_globals)
+
     # Generate stubs for cross-segment Proc_ references not declared
     declared_procs = {f['pascal_name'] for f in pascal_funcs}
     proc_refs = set(re.findall(r'\bProc_[0-9a-fA-F]+_[0-9a-fA-F]+\b', all_pascal_text))

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.20.0] - 2026-03-31
+
+### Added
+- `pascal_emit/pipeline.py`: automatic string global detection and retyping — globals that receive `bp_str_assign_const` / `bp_str_copy_const` assignments are retyped from `Integer` to `String[N]` (where N is the max assigned string length), and the assignments are uncommented to active Pascal code
+
+### Changed
+- RECORDS: 13 → 9 commented lines (-4); `g_0072 := 'Sword'`, `g_0085 := 'Shield'`, `g_0098 := 'Potion'`, `g_00AB := 'Ring'` now emit as active assignments with globals typed as `String[5]`..`String[6]`
+- GAMESIM: 3 → 2 commented lines (-1); `g_0052 := 'TestPlayer'` now active with global typed as `String[10]`
+- Compilation: 15/16 programs unchanged (93.75%), no regressions
+
 ## [2.19.0] - 2026-03-31
 
 ### Added
