@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.23.0] - 2026-04-01
+
+### Added
+- `pascal_emit/body_converter.py`: array element assignment handler — `var[idx] = expr;` now converts to `var[idx] := expr;` instead of falling through to commented output
+- `pascal_emit/pipeline.py`: Func_() calls in WriteLn with missing args now get placeholder args (0 for non-var, `_tmp_` for var params) instead of commenting the entire WriteLn line; second `_tmp_` variable collection pass ensures declarations are emitted
+
+### Changed
+- PROCFUNC: 10 → 6 commented lines (-4; array element assignment + Func_() placeholder args in WriteLn now active)
+- `ROADMAP.md`: updated quality metrics to v2.23.0 — 174 total non-stub commented lines
+
 ## [2.22.0] - 2026-04-01
 
 ### Added

@@ -969,6 +969,14 @@ def convert_c_line(line, func_info):
         rhs = convert_expression(ptr_assign.group(2))
         return f'{indent}{lhs} := {rhs};'
 
+    # Array element assignment: var[idx] = expr;
+    arr_elem_assign = re.match(r'^(\w+)\[(.+?)\]\s*=\s*(.+?)\s*;$', line)
+    if arr_elem_assign:
+        lhs_var = arr_elem_assign.group(1)
+        idx = convert_expression(arr_elem_assign.group(2))
+        rhs = convert_expression(arr_elem_assign.group(3))
+        return f'{indent}{lhs_var}[{idx}] := {rhs};'
+
     # Simple assignment
     simple_assign = re.match(r'^(\w+)\s*=\s*(.+?)\s*;$', line)
     if simple_assign:

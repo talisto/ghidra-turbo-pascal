@@ -2,7 +2,7 @@
 
 > A prioritized plan for producing working Turbo Pascal 7 source files from Ghidra-decompiled DOS MZ executables. The goal is not byte-identical reproduction — it's **functional Pascal programs** that compile with TP7/FPC and produce the same observable behavior as the original.
 
-## Current State (v2.22.0)
+## Current State (v2.23.0)
 
 | Capability | Status |
 |------------|--------|
@@ -25,8 +25,10 @@
 | Noise line suppression | ✅ Complete (~40 patterns) |
 | CARRY2 32-bit carry arithmetic conversion | ✅ Complete |
 | Proc_ var parameter temp variable generation | ✅ Complete |
+| Array element assignment conversion | ✅ Complete |
+| Func_() placeholder args in WriteLn | ✅ Complete |
 
-### Current Pascal Output Quality (v2.22.0)
+### Current Pascal Output Quality (v2.23.0)
 
 Assessed against 16 test programs with known original source:
 
@@ -34,14 +36,14 @@ Assessed against 16 test programs with known original source:
 |--------|-------|
 | Programs that compile (FPC -Mtp -Sc) | **15/16** (93.75%) |
 | Programs **successfully transpiled** (compile + 0 non-stub commented lines) | **8/16** (50%) |
-| Total commented lines (non-stub) | **178** across all programs |
+| Total commented lines (non-stub) | **174** across all programs |
 
 **Quality tier breakdown:**
 
 | Tier | Programs | Count |
 |------|----------|-------|
 | **Clean** (compiles, 0 non-stub commented lines) | CONTROL, CRTTEST, EXITPROC, GAMESIM, HELLO, MATHOPS, OVRTEST, TYPECAST | 8 |
-| **Incomplete** (compiles, but has commented-out code = missing functionality) | DDTEST(95), DOSTEST(18), PROCFUNC(9), PTRMEM(8), RANDTEST(1), RECORDS(7), STRINGS(25) | 7 |
+| **Incomplete** (compiles, but has commented-out code = missing functionality) | DDTEST(95), DOSTEST(18), PROCFUNC(5), PTRMEM(8), RANDTEST(1), RECORDS(7), STRINGS(25) | 7 |
 | **Broken** (does not compile) | FILEIO(15) | 1 |
 
 > **Important**: A program is NOT considered successfully transpiled if it contains ANY commented-out code (excluding cross-segment stubs). Every commented-out line — even a single `{ bp_delete(); }` — represents missing functionality. The transpiled program will not behave the same as the original.
