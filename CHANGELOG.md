@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-03-30
+
+### Fixed
+- `pascal_emit/write_sequences.py`: strip `/* "..." */` string annotations from dat_values before expression conversion — prevents garbled output like `990 div * "Hello World" * div:108` when annotated hex constants flow through the expression converter
+- `pascal_emit/body_converter.py`: comment out orphaned `Break` statements that end up outside any loop context after `_sanitize_ghidra_artifacts` empties loop bodies containing pointer variable references
+
+### Changed
+- PROCFUNC now compiles (15/16 programs = 93.75%, up from 87.5%)
+
 ## [2.13.0] - 2026-03-30
 
 ### Added

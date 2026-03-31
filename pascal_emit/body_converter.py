@@ -678,6 +678,47 @@ def _sanitize_ghidra_artifacts(lines):
     # Second pass: comment out orphaned end; keywords whose matching begin
     # was commented out.  Track depth from lines that are NOT comments.
     result = _fix_orphaned_ends(result)
+    result = _fix_orphaned_breaks(result)
+    return result
+
+
+def _fix_orphaned_breaks(lines):
+    """Comment out Break statements that are not inside a while/repeat loop.
+
+    Tracks loop depth by counting while/repeat openers and their matching
+    end; closers.  A ``Break`` at depth 0 is orphaned and gets commented out.
+    """
+    # First pass: determine loop depth at each line
+    loop_depth = 0
+    # Track begin/end depth within loops to match the right end;
+    block_stack = []  # stack of (kind, depth) where kind is 'loop' or 'block'
+    result = []
+    for line in lines:
+        stripped = line.strip()
+        is_comment = stripped.startswith('{') and stripped.endswith('}')
+        if is_comment or not stripped:
+            result.append(line)
+            continue
+
+        is_loop_start = bool(re.search(r'\bwhile\b.*\bdo\b.*\bbegin\b', stripped)) or stripped == 'repeat'
+        has_begin = bool(re.search(r'\bbegin\b', stripped))
+        is_standalone_end = stripped == 'end;'
+
+        if is_loop_start:
+            loop_depth += 1
+            block_stack.append('loop')
+        elif has_begin and not is_loop_start:
+            block_stack.append('block')
+        elif is_standalone_end and block_stack:
+            kind = block_stack.pop()
+            if kind == 'loop':
+                loop_depth -= 1
+
+        if re.search(r'\bBreak\b', stripped, re.IGNORECASE) and loop_depth <= 0:
+            indent = line[:len(line) - len(line.lstrip())]
+            result.append(f'{indent}{{ {stripped} }}')
+        else:
+            result.append(line)
     return result
 
 

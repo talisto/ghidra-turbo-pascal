@@ -54,6 +54,7 @@ COMPILING_PROGRAMS = {
     'HELLO',
     'MATHOPS',
     'OVRTEST',
+    'PROCFUNC',
     'PTRMEM',
     'RANDTEST',
     'RECORDS',
@@ -64,7 +65,6 @@ COMPILING_PROGRAMS = {
 # Programs that are expected to fail (not yet fixed)
 EXPECTED_FAILURES = {
     'FILEIO',
-    'PROCFUNC',
 }
 
 

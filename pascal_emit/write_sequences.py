@@ -3,6 +3,13 @@ import re
 
 from .expressions import convert_expression
 
+_ANNOTATION_RE = re.compile(r'\s*/\*.*?\*/')
+
+
+def _strip_annotation(val):
+    """Strip /* ... */ string annotations from a value."""
+    return _ANNOTATION_RE.sub('', val).strip()
+
 
 # Patterns for Write/WriteLn-related calls
 # Match both hash-based labels (bp_write_str) and FLIRT-style names (_Write_qm4Text*)
@@ -347,7 +354,7 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
                     dat_annotations.append(ann)
                 dat_val_match = re.search(r'DAT_\w+\s*=\s*(.+?)\s*;', jline)
                 if dat_val_match:
-                    val = dat_val_match.group(1).strip()
+                    val = _strip_annotation(dat_val_match.group(1))
                     dat_values.append(val)
                 j += 1
                 continue
@@ -361,7 +368,7 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
                     dat_annotations.append(ann)
                 pv_match = re.search(r'=\s*(.+?)\s*;', jline)
                 if pv_match:
-                    val = pv_match.group(1).strip()
+                    val = _strip_annotation(pv_match.group(1))
                     dat_values.append(val)
                 j += 1
                 continue
@@ -370,7 +377,7 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
             if re.match(r'^[iu]Var\d+\s*=', jline):
                 val_match = re.search(r'=\s*(.+?)\s*;', jline)
                 if val_match:
-                    dat_values.append(val_match.group(1).strip())
+                    dat_values.append(_strip_annotation(val_match.group(1)))
                 j += 1
                 continue
 
@@ -378,7 +385,7 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
             if re.match(r'\*\((?:int|uint|undefined[124]) \*\)\(puVar\d+ \+ -', jline):
                 pv_match = re.search(r'=\s*(.+?)\s*;', jline)
                 if pv_match:
-                    dat_values.append(pv_match.group(1).strip())
+                    dat_values.append(_strip_annotation(pv_match.group(1)))
                 j += 1
                 continue
 
