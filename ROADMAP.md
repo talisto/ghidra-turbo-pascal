@@ -2,7 +2,7 @@
 
 > A prioritized plan for producing working Turbo Pascal 7 source files from Ghidra-decompiled DOS MZ executables. The goal is not byte-identical reproduction — it's **functional Pascal programs** that compile with TP7/FPC and produce the same observable behavior as the original.
 
-## Current State (v2.21.0)
+## Current State (v2.22.0)
 
 | Capability | Status |
 |------------|--------|
@@ -10,7 +10,7 @@
 | FLIRT + hash-based RTL function labeling (~90 signatures) | ✅ Complete |
 | Single-pass headless decompilation pipeline | ✅ Complete |
 | Overlay (.OVR) loading | ✅ Complete |
-| 16 test binaries with full pytest coverage | ✅ Complete (643 tests) |
+| 16 test binaries with full pytest coverage | ✅ Complete (659 tests) |
 | C-to-Pascal transpiler (`pascal_emit/`) | ✅ Functional — 15/16 compile |
 | Library code elimination in decompiled output | ✅ Complete |
 | Artifact cleanup (CONCAT11, unaff_DS, calling conventions) | ✅ Complete |
@@ -23,24 +23,26 @@
 | String global auto-retyping | ✅ Complete (Integer → String[N] when string-assigned) |
 | Cross-segment Proc_/Func_ stub generation | ✅ Complete |
 | Noise line suppression | ✅ Complete (~40 patterns) |
+| CARRY2 32-bit carry arithmetic conversion | ✅ Complete |
+| Proc_ var parameter temp variable generation | ✅ Complete |
 
-### Current Pascal Output Quality (v2.21.0)
+### Current Pascal Output Quality (v2.22.0)
 
 Assessed against 16 test programs with known original source:
 
 | Metric | Value |
 |--------|-------|
 | Programs that compile (FPC -Mtp -Sc) | **15/16** (93.75%) |
-| Programs **successfully transpiled** (compile + 0 non-stub commented lines) | **7/16** (43.75%) |
-| Total commented lines (non-stub) | **~188** across all programs |
+| Programs **successfully transpiled** (compile + 0 non-stub commented lines) | **8/16** (50%) |
+| Total commented lines (non-stub) | **178** across all programs |
 
 **Quality tier breakdown:**
 
 | Tier | Programs | Count |
 |------|----------|-------|
-| **Clean** (compiles, 0 non-stub commented lines) | CONTROL, CRTTEST, EXITPROC, HELLO, MATHOPS, OVRTEST, TYPECAST | 7 |
-| **Incomplete** (compiles, but has commented-out code = missing functionality) | DDTEST(95), DOSTEST(18), GAMESIM(2), PROCFUNC(11), PTRMEM(11), RANDTEST(1), RECORDS(9), STRINGS(25) | 8 |
-| **Broken** (does not compile) | FILEIO(16) | 1 |
+| **Clean** (compiles, 0 non-stub commented lines) | CONTROL, CRTTEST, EXITPROC, GAMESIM, HELLO, MATHOPS, OVRTEST, TYPECAST | 8 |
+| **Incomplete** (compiles, but has commented-out code = missing functionality) | DDTEST(95), DOSTEST(18), PROCFUNC(9), PTRMEM(8), RANDTEST(1), RECORDS(7), STRINGS(25) | 7 |
+| **Broken** (does not compile) | FILEIO(15) | 1 |
 
 > **Important**: A program is NOT considered successfully transpiled if it contains ANY commented-out code (excluding cross-segment stubs). Every commented-out line — even a single `{ bp_delete(); }` — represents missing functionality. The transpiled program will not behave the same as the original.
 

@@ -7,9 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-04-01
+
+### Added
+- `pascal_emit/body_converter.py`: CARRY2 32-bit carry arithmetic conversion — `Word(CARRY2)(a, b)` artifacts from Ghidra's 16-bit carry decomposition are now converted to `Word(Ord(LongInt(a) + LongInt(b) > 65535))`, producing valid Pascal for 32-bit addition overflow detection
+- `pascal_emit/pipeline.py`: Proc_/Func_ calls with `var` parameters now generate typed temp variables (`_tmp_ProcName_idx`) instead of being commented out — `var` params get correctly-typed temp placeholders while non-var params get literal `0`
+
 ### Changed
-- `test_fpc_compilation.py`: replaced hollow-body detection with strict commented-line counting — `CLEAN_PROGRAMS` (7) must have exactly 0 non-stub commented lines, `INCOMPLETE_PROGRAMS` (8) are tracked for regression; removed `_find_hollow_functions()` in favor of simpler `_count_commented_lines()`
-- `ROADMAP.md`: corrected quality metrics — 7/16 successfully transpiled (not 12/16); DOSTEST, GAMESIM, RANDTEST, RECORDS, STRINGS correctly categorized as Incomplete (have commented-out code = missing functionality)
+- `pascal_emit/write_sequences.py`: fixed FLIRT name matching for `_Write_qm4Text4Char4Word` and `_Write_qm4Text4Real4Wordt3` — write char/real regex patterns now use `\w*` suffix to match mangled FLIRT signatures with extra type suffixes, allowing these calls to participate in Write/WriteLn sequence merging
+- `pascal_emit/body_converter.py`: removed `CARRY\d` from `_LEAKED_IDENT_RE` since CARRY2 artifacts are now converted to valid Pascal before the sanitizer runs
+- `test_fpc_compilation.py`: replaced hollow-body detection with strict commented-line counting — `CLEAN_PROGRAMS` (8) must have exactly 0 non-stub commented lines, `INCOMPLETE_PROGRAMS` (7) are tracked for regression; removed `_find_hollow_functions()` in favor of simpler `_count_commented_lines()`; moved GAMESIM to `CLEAN_PROGRAMS`
+- GAMESIM: 2 → 0 commented lines — **moved to Clean tier** (CARRY2 conversion resolved both remaining lines)
+- RECORDS: 9 → 7 commented lines (-2; CARRY2 conversion + var param temp variable generation)
+- PROCFUNC: 12 → 10 commented lines (-2; var param temp variable generation for Proc_ calls)
+- PTRMEM: 14 → 11 commented lines (-3; var param temp variable generation)
+- FILEIO: 22 → 21 commented lines (-1; FLIRT write char regex now matches `_Write_qm4Text4Char4Word`)
+- 8 programs now produce fully clean output with 0 non-stub commented lines (up from 7)
+- `ROADMAP.md`: updated quality metrics to v2.22.0 — 8/16 clean (50%), 178 total non-stub commented lines
 
 ## [2.21.0] - 2026-03-31
 

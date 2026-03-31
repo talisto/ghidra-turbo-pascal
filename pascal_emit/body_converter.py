@@ -652,6 +652,16 @@ def convert_function_body(body, strings_db, func_info, exe_reader=None):
     while result and not result[-1].strip():
         result.pop()
 
+    # Phase 4.4: Convert CARRY2 artifacts to LongInt arithmetic
+    _CARRY2_RE = re.compile(
+        r'Word\(CARRY2\)\(([^,]+),\s*([^)]+)\)')
+    for i, line in enumerate(result):
+        if 'CARRY2' in line:
+            result[i] = _CARRY2_RE.sub(
+                lambda m: (f'Word(Ord(LongInt({m.group(1).strip()}) + '
+                           f'LongInt({m.group(2).strip()}) > 65535))'),
+                line)
+
     # Phase 4.5: Sanitize leaked Ghidra identifiers
     result = _sanitize_ghidra_artifacts(result)
 
@@ -663,7 +673,7 @@ def convert_function_body(body, strings_db, func_info, exe_reader=None):
 
 # Patterns for identifiers that must not appear in active Pascal code
 _LEAKED_IDENT_RE = re.compile(
-    r'\b(?:p[bui]Var\d+|abStack_\w+|CARRY\d|func_0x[0-9a-f]+|'
+    r'\b(?:p[bui]Var\d+|abStack_\w+|func_0x[0-9a-f]+|'
     r'extraout_\w+|stack0x[0-9a-f]+|DAT_[0-9a-f_]+|FUN_[0-9a-f_]+|'
     r'dos_\w+)\b',
     re.IGNORECASE

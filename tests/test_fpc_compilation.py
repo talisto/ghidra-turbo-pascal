@@ -154,6 +154,7 @@ CLEAN_PROGRAMS = {
     'CONTROL',
     'CRTTEST',
     'EXITPROC',
+    'GAMESIM',
     'HELLO',
     'MATHOPS',
     'OVRTEST',
@@ -165,7 +166,6 @@ CLEAN_PROGRAMS = {
 INCOMPLETE_PROGRAMS = {
     'DDTEST',
     'DOSTEST',
-    'GAMESIM',
     'PROCFUNC',
     'PTRMEM',
     'RANDTEST',
