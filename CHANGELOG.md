@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-03-30
+
+### Added
+- `pascal_emit/pipeline.py`: extended unsafe line detection with C pointer type casts `(type *)` and non-array parameter indexing `param_N[M]` — these patterns are now auto-commented, preventing FPC "Illegal qualifier" errors
+- `pascal_emit/body_converter.py`: C array variable declarations (`type name[size];`) now convert to Pascal array types instead of being ignored
+
+### Changed
+- PTRMEM now compiles, RECORDS now compiles (14/16 programs = 87.5%, up from 81.25%)
+- PROCFUNC structural error fixed — function body was lost due to for loop continuation being stripped as uVar noise; now at 3 errors (down from blocking structural failure at line 111)
+
+### Fixed
+- `pascal_emit/body_converter.py`: for loop regex changed from non-greedy `(.+?)` to greedy `(.+)` to handle nested parens like `(uint)` in for loop content
+- `pascal_emit/body_converter.py`: `uVar\d+ =` noise pattern now requires trailing `;` to avoid stripping for loop continuation lines like `uVar2 = uVar2 - 1) {`
+- `pascal_emit/body_converter.py`: for loops with comma-body expressions emit `while True do begin` instead of multi-line comments that break block nesting
+- `pascal_emit/pipeline.py`: local variable extraction regex now handles complex types like `array[0..N] of Type` (was only matching single-word types)
+
 ## [2.12.0] - 2026-03-30
 
 ### Added

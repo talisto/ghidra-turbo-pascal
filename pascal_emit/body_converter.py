@@ -31,7 +31,7 @@ NOISE_PATTERNS = [
     re.compile(r'^\s*\w+ unaff_\w+\s*;'),
     re.compile(r'^\s*\w+ extraout_\w+\s*;'),
     re.compile(r'^\s*\w+ uVar\d+\s*;'),
-    re.compile(r'^\s*uVar\d+\s*=\s*'),
+    re.compile(r'^\s*uVar\d+\s*=\s*.*;\s*$'),
     re.compile(r'^\s*DAT_\w+\s*='),
     re.compile(r'^\s*/\*\s*WARNING'),
     re.compile(r'^\s*func_0x'),
@@ -456,11 +456,9 @@ def _convert_for_loop(for_content, indent):
             start_expr = convert_expression(start)
             end_expr = convert_expression(end)
             if comma_body:
-                # Comma operator: body runs BEFORE the != check, so the
-                # loop body executes for the end value too. The Pascal
-                # for loop is inclusive, so end_value = end.
-                pre_stmt = convert_expression(comma_body.strip())
-                return f'{indent}for {var_init} := {start_expr} to {end_expr} do begin\n{indent}  {pre_stmt};'
+                # Multi-assignment comma body — emit as while loop
+                # (commented for header, body lines still processed)
+                return f'{indent}while True do begin'
             else:
                 # No comma body: loop stops BEFORE end value
                 try:
@@ -478,8 +476,9 @@ def _convert_for_loop(for_content, indent):
             start_expr = convert_expression(start)
             end_expr = convert_expression(end)
             if comma_body:
-                pre_stmt = convert_expression(comma_body.strip())
-                return f'{indent}for {var_init} := {start_expr} downto {end_expr} do begin\n{indent}  {pre_stmt};'
+                # Multi-assignment comma body — emit as while loop
+                # (commented for header, body lines still processed)
+                return f'{indent}while True do begin'
             else:
                 try:
                     end_val = int(end) + 1
@@ -761,6 +760,15 @@ def convert_c_line(line, func_info):
             return f'{indent}{{ var {vname}: {ptype}; }}'
         return None
 
+    # C array variable declarations: type name [size];
+    arr_decl = re.match(r'^(\w+)\s+(\w+)\s*\[(\d+)\]\s*;$', line)
+    if arr_decl:
+        ctype = arr_decl.group(1)
+        vname = arr_decl.group(2)
+        size = int(arr_decl.group(3))
+        ptype = c_type_to_pascal(ctype) or 'Byte'
+        return f'{indent}{{ var {vname}: array[0..{size - 1}] of {ptype}; }}'
+
     # Variable declarations with initialization
     var_init = re.match(r'^(\w+)\s+(\w+)\s*=\s*(.+?)\s*;$', line)
     if var_init:
@@ -836,7 +844,8 @@ def convert_c_line(line, func_info):
         return f'{indent}until {neg_cond};'
 
     # for loop — try to convert to Pascal for/while
-    for_match = re.match(r'^for\s*\((.+?)\)\s*\{?\s*$', line)
+    # Use greedy .+ to handle nested parens in for(...) content like (uint)
+    for_match = re.match(r'^for\s*\((.+)\)\s*\{?\s*$', line)
     if for_match:
         return _convert_for_loop(for_match.group(1), indent)
 

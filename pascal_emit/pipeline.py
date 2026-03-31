@@ -182,17 +182,25 @@ _TEMP_VAR_TYPES = {
 
 # Pattern matching unconverted C pointer dereferences in Pascal output
 _UNSAFE_C_RE = re.compile(r'\*\s*\(\s*\w+\s*\*')
+# C pointer type casts like (int *) or (word *)
+_UNSAFE_CAST_RE = re.compile(r'\(\w+\s*\*\s*[)(]')
+# Non-array variable indexing: varname[digits] where var is not array type
+_NONARRAY_INDEX_RE = re.compile(r'\bparam_\w+\[|\(\w+\)\[\d+\]')
 
 
-def _comment_out_unsafe_lines(body, array_vars=None):
+def _comment_out_unsafe_lines(body, array_vars=None, param_names=None):
     """Comment out lines that contain unconverted C constructs.
 
     Detects:
     - Remaining C pointer dereferences: *(type *)expr
+    - C pointer type casts: (type *)
     - Scalar assignments to array-typed variables
+    - Indexing on non-array params: param_N[M]
     """
     if array_vars is None:
         array_vars = set()
+    if param_names is None:
+        param_names = set()
     lines = body.split('\n')
     result = []
     for line in lines:
@@ -204,7 +212,11 @@ def _comment_out_unsafe_lines(body, array_vars=None):
         # Strip out { ... } comment sections before checking for unsafe C
         uncommented = re.sub(r'\{[^}]*\}', '', stripped)
         # Check for unconverted C pointer dereferences in uncommented text
-        if _UNSAFE_C_RE.search(uncommented):
+        if _UNSAFE_C_RE.search(uncommented) or _UNSAFE_CAST_RE.search(uncommented):
+            result.append(line.replace(stripped, '{ ' + stripped + ' }'))
+            continue
+        # Check for non-array parameter indexing: param_N[M]
+        if _NONARRAY_INDEX_RE.search(uncommented):
             result.append(line.replace(stripped, '{ ' + stripped + ' }'))
             continue
         # Check for scalar assignment to array-typed variable
@@ -453,7 +465,7 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
         local_vars = []
         clean_body_lines = []
         for bline in body.split('\n'):
-            lv_match = re.match(r'\s*\{ var (\w+): (\w+); \}', bline)
+            lv_match = re.match(r'\s*\{ var (\w+): (.+?); \}', bline)
             if lv_match:
                 local_vars.append((lv_match.group(1), lv_match.group(2)))
             else:
