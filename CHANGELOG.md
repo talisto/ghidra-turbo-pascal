@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `pascal_emit/expressions.py`: memory access expressions with hex offsets (`*(int *)(var + 0x15)`) now correctly convert to Pascal indexed access (`var[21]`) — offset patterns accept both hex and decimal, and `_convert_atomic_condition` handles them identically
+- `pascal_emit/write_sequences.py`: `WRITE_LONGINT_ARGS_RE` third argument now handles nested parentheses in expressions (uses `.+` instead of `[^)]+`)
+
 ## [2.7.0] - 2026-03-30
 
 ### Added

@@ -19,15 +19,16 @@ def convert_expression(expr):
         expr
     )
     # *(int *)(param_N + offset) → param_N[offset]  (indexed access)
+    # Offset may be hex (0xNN) or decimal
     expr = re.sub(
-        r'\*\((?:int|uint|word|byte|char) \*\)\((\w+) \+ (\d+)\)',
-        lambda m: f'{m.group(1)}[{m.group(2)}]',
+        r'\*\((?:int|uint|word|byte|char) \*\)\((\w+) \+ (0x[0-9a-f]+|\d+)\)',
+        lambda m: f'{m.group(1)}[{int(m.group(2), 0)}]',
         expr
     )
     # *(int *)(param_N + -offset) → param_N[-offset]  (negative indexed access)
     expr = re.sub(
-        r'\*\((?:int|uint|word|byte|char) \*\)\((\w+) \+ (-\d+)\)',
-        lambda m: f'{m.group(1)}[{m.group(2)}]',
+        r'\*\((?:int|uint|word|byte|char) \*\)\((\w+) \+ (-(?:0x[0-9a-f]+|\d+))\)',
+        lambda m: f'{m.group(1)}[{int(m.group(2), 0)}]',
         expr
     )
     # (type *)variable → variable  (pointer cast — drop for var params)
@@ -246,8 +247,8 @@ def _convert_atomic_condition(cond):
     )
     # Pointer casts and dereferences (same as convert_expression)
     cond = re.sub(
-        r'\*\((?:int|uint|word|byte|char) \*\)\((\w+) \+ (-?\d+)\)',
-        lambda m: f'{m.group(1)}[{m.group(2)}]',
+        r'\*\((?:int|uint|word|byte|char) \*\)\((\w+) \+ (-?(?:0x[0-9a-f]+|\d+))\)',
+        lambda m: f'{m.group(1)}[{int(m.group(2), 0)}]',
         cond
     )
     cond = re.sub(r'\((?:int|uint|word|byte|char) \*\)(\w+)', r'\1', cond)
