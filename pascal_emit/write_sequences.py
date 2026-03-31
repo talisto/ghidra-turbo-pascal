@@ -33,11 +33,12 @@ def _is_inlinable_value(val):
 
 # Patterns for Write/WriteLn-related calls
 # Match both hash-based labels (bp_write_str) and FLIRT-style names (_Write_qm4Text*)
+# bp_write_str_body is the large-RTL variant used in bigger binaries
 WRITE_STR_CALL_RE = re.compile(
-    r'(?:bp_write_str|FUN_\w+_0670|_Write_qm4Text(?:m6String|7String)4Word)\s*\('
+    r'(?:bp_write_str(?:_body)?|FUN_\w+_0670|_Write_qm4Text(?:m6String|7String)4Word)\s*\('
 )
 WRITE_STR_ARGS_RE = re.compile(
-    r'(?:bp_write_str|FUN_\w+_0670)\s*\(\s*\d+\s*,\s*(0x[0-9a-f]+|\d+)\s*,\s*0x[0-9a-f]+\s*\)'
+    r'(?:bp_write_str(?:_body)?|FUN_\w+_0670)\s*\(\s*\d+\s*,\s*(0x[0-9a-f]+|\d+)\s*,\s*0x[0-9a-f]+\s*\)'
 )
 WRITE_INT_RE = re.compile(
     r'(?:bp_write_int)\s*\('
@@ -46,7 +47,7 @@ WRITE_LONGINT_RE = re.compile(
     r'(?:bp_write_longint|bp_write7Longint4Word|_Write_qm4Text7Longint4Word)\s*\('
 )
 WRITELN_END_RE = re.compile(
-    r'(?:bp_write_char_flush|bp_writeln|_WriteLn_qm4Text)\s*\('
+    r'(?:bp_write_char_flush|bp_writeln(?:_impl)?|_WriteLn_qm4Text)\s*\('
 )
 WRITE_END_RE = re.compile(
     r'(?:bp_flush_text_cond|bp_write(?!\w)|_Write_qm4Text)\s*\('
@@ -59,6 +60,9 @@ WRITE_CHAR_ARGS_RE = re.compile(
 )
 WRITE_REAL_RE = re.compile(
     r'FUN_\w+_078a\s*\('
+)
+WRITE_BOOL_RE = re.compile(
+    r'(?:bp_write_bool|_Write_qm4Text7Boolean4Word)\s*\('
 )
 STRING_ANNOTATION_RE = re.compile(r'/\*\s*"((?:[^"\\]|\\.)*)"\s*\*/')
 
@@ -308,6 +312,14 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
             if WRITE_REAL_RE.search(jline):
                 found_write = True
                 parts.append('0.0')
+                dat_values.clear()
+                j += 1
+                continue
+
+            # Write Boolean part (bp_write_bool / _Write_qm4Text7Boolean4Word)
+            if WRITE_BOOL_RE.search(jline):
+                found_write = True
+                parts.append('{bool}')
                 dat_values.clear()
                 j += 1
                 continue

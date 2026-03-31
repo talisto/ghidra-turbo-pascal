@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-03-31
+
+### Added
+- `pascal_emit/write_sequences.py`: extended Write/WriteLn sequence detection to recognize large-RTL variants `bp_write_str_body` and `bp_writeln_impl` — these are the write functions used in bigger BP7 binaries (different from `bp_write_str`/`bp_writeln` used in small binaries)
+- `pascal_emit/write_sequences.py`: added `WRITE_BOOL_RE` pattern for `bp_write_bool` / `_Write_qm4Text7Boolean4Word` — boolean writes now participate in Write/WriteLn sequence merging instead of being emitted as standalone `{ bp_write_bool(); }` comments
+
+### Changed
+- PTRMEM: 62 → 17 commented lines (-45); most Write/WriteLn statements now emit as active Pascal code with resolved string arguments from DAT_ annotations
+- Compilation: 15/16 programs unchanged (93.75%), no regressions
+
 ## [2.16.0] - 2026-03-31
 
 ### Added
