@@ -7,18 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-03-31
+
+### Added
+- `pascal_emit/body_converter.py`: strip C-style comments (`/* ... */`) from lines before pattern matching in `convert_c_line()` — Ghidra description comments and string annotations no longer prevent function call recognition by regex patterns with `$` anchors
+- `pascal_emit/body_converter.py`: string assignment converter for `bp_str_assign_const` and `bp_str_copy_const` — when the source offset resolves to a string in the strings DB, emits `{ g_XXXX := 'value'; }` instead of raw `{ bp_str_assign_const(0xf,0x72,unaff_DS,...); }`
+- `pascal_emit/body_converter.py`: added noise functions to `skip_names`: `bp_str_temp_free`, `bp_unit_init`, `bp___stackcheck`, `bp___systeminit`, `bp_textrec_init`, `bp_text_open_check`
+- `pascal_emit/body_converter.py`: Write internals (`bp_write_str_body`, `bp_writeln_impl`, `bp_write_bool`, `bp_write_real`, `bp_write_setup`, `bp_write_char_buf`) emit clean `{ fname(); }` comments instead of raw Ghidra output with C comment suffixes
+- `pascal_emit/pipeline.py`: `strings_db` passed through `func_info` to `convert_c_line()` for direct string lookup
+
+### Changed
+- PTRMEM: 93 → 62 commented lines (-31 noise lines removed)
+- DDTEST: 128 → 120 commented lines (-8 noise lines)
+- FILEIO: 31 → 23 commented lines (-8 noise lines)
+- RECORDS: string constants now visible as readable Pascal: `{ g_0072 := 'Sword'; }`, `{ g_0085 := 'Shield'; }`, etc.
+- GAMESIM: `{ g_0052 := 'TestPlayer'; }` replaces raw `{ bp_str_copy_const(...); }`
+
+## [2.15.0] - 2026-03-30
+
 ### Added
 - `pascal_emit/body_converter.py`: CRT function converters — `crt_wherex_impl` → `WhereX`, `crt_wherey_impl` → `WhereY`, `crt_gotoxy_impl` → `GotoXY` in `_LABEL_TO_PASCAL`, plus `crt_textattr_set(value)` → `TextAttr := value` setter conversion
 - `pascal_emit/expressions.py`: CRT functions added to `_EXPR_LABEL_MAP` for expression contexts; parameterless function argument stripping for `WhereX`, `WhereY`, `ReadKey`, `KeyPressed`, `ParamCount`, `Randomize`
 - `pascal_emit/write_sequences.py`: temp variable inlining — when a write call uses `uVar1` as its value, substitute the actual expression (e.g., `Random(100)`) from the preceding assignment, with safety check to only inline known convertible functions
 - `pascal_emit/body_converter.py`: preserve `uVar` assignments when the variable is referenced elsewhere in the function body (prevents stripping assignments to variables used in Write calls)
 
-### Fixed
-- `pascal_emit/write_sequences.py`: strip `/* "..." */` string annotations from dat_values before expression conversion — prevents garbled output like `990 div * "Hello World" * div:108` when annotated hex constants flow through the expression converter
-- `pascal_emit/body_converter.py`: comment out orphaned `Break` statements that end up outside any loop context after `_sanitize_ghidra_artifacts` empties loop bodies containing pointer variable references
-
 ### Changed
-- PROCFUNC now compiles (15/16 programs = 93.75%, up from 87.5%)
 - RANDTEST Write calls now show `Random(100)` instead of uninitialized `uVar1`
 - CRTTEST now correctly emits `WhereX`, `WhereY`, and `TextAttr :=` instead of raw `crt_*` function calls
 

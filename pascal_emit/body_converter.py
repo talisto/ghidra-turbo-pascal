@@ -793,12 +793,22 @@ def _fix_orphaned_ends(lines):
     return result
 
 
+# Regex to strip C-style comments (/* ... */) from a line
+_C_COMMENT_RE = re.compile(r'/\*.*?\*/')
+
+
 def convert_c_line(line, func_info):
     """Convert a single C statement line to Pascal."""
     if not line:
         return ''
 
     indent = '  '
+
+    # Strip C-style comments before pattern matching.
+    # Ghidra description comments (/* ... */) and string annotations
+    # prevent regex patterns with $ anchors from matching.
+    original_line = line
+    line = _C_COMMENT_RE.sub('', line).strip()
 
     # Return statement with value (function result) — must be before var_decl
     ret_match = re.match(r'^return\s+(.+?)\s*;$', line)
@@ -965,6 +975,9 @@ def convert_c_line(line, func_info):
             'bp_module_init', 'bp_clear_dseg', 'bp_runtime_init',
             'bp_input_init', 'bp_output_init', 'bp_printstring',
             '___SystemInit_qv',
+            'bp_str_temp_free', 'bp_unit_init',
+            'bp___stackcheck', 'bp___systeminit',
+            'bp_textrec_init', 'bp_text_open_check',
         }
         if fname in skip_names:
             return None
@@ -979,6 +992,29 @@ def convert_c_line(line, func_info):
                 val = convert_expression(args_match.group(1))
                 return f'{indent}{var_name} := {val};'
             return None
+        # String assignment from constant: look up source string in DB
+        if fname in ('bp_str_assign_const', 'bp_str_copy_const'):
+            args_match = re.search(r'\((.+)\)', line)
+            if args_match:
+                parts = [a.strip() for a in args_match.group(1).split(',')]
+                if len(parts) >= 5:
+                    dest_off = parts[1]
+                    dest_seg = parts[2]
+                    src_off = parts[3]
+                    sdb = func_info.get('strings_db', {})
+                    if dest_seg == 'unaff_DS' and dest_off.startswith('0x'):
+                        # Look up source string in strings DB
+                        string_val = None
+                        try:
+                            src_int = int(src_off, 16) if src_off.startswith('0x') else int(src_off)
+                            string_val = sdb.get(src_int)
+                        except ValueError:
+                            pass
+                        if string_val:
+                            var_name = f'g_{dest_off[2:].zfill(4).upper()}'
+                            escaped = string_val.replace("'", "''")
+                            return f"{indent}{{ {var_name} := '{escaped}'; }}"
+            return f'{indent}{{ {line} }}'
         # Library label → Pascal builtin
         if fname in _LABEL_TO_PASCAL:
             pascal_name = _LABEL_TO_PASCAL[fname]
@@ -990,6 +1026,12 @@ def convert_c_line(line, func_info):
         # Skip FLIRT-identified system init/IO functions
         if re.match(r'^_(?:Halt|WriteLn|Write|ReadLn|Read|RunError)_q', fname):
             return f'{indent}{{ {line} }}'
+        # Write implementation internals — keep as comment to preserve context
+        # (args passed via DAT_ globals, unresolvable by body_converter)
+        if fname in ('bp_write_str_body', 'bp_writeln_impl',
+                     'bp_write_bool', 'bp_write_real',
+                     'bp_write_setup', 'bp_write_char_buf'):
+            return f'{indent}{{ {fname}(); }}'
         if fname.startswith('FUN_'):
             # Write char function (FUN_xxxx_067b)
             if re.match(r'FUN_\w+_067b$', fname):

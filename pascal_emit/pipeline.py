@@ -457,6 +457,7 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
             'ret_type': ret_type,
             'params': params,
             'ir': fn,
+            'strings_db': strings_db,
         }
 
         body = convert_function_body(body_text, strings_db, func_info, exe_reader)
@@ -501,6 +502,7 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
             'ret_type': 'void',
             'params': [],
             'ir': entry_fn,
+            'strings_db': strings_db,
         }
         main_body = convert_function_body(body_text, strings_db, func_info, exe_reader)
 
