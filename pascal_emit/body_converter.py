@@ -926,6 +926,14 @@ def convert_c_line(line, func_info):
             args_match = re.search(r'\((.+)\)', line)
             if args_match:
                 args = args_match.group(1)
+                # Strip segment constants from far call arguments.
+                # FUN_SSSS_xxxx calls pass seg:off pairs; the segment 0xSSSS
+                # is meaningless in Pascal and causes param count mismatches.
+                seg_match = re.match(r'FUN_([0-9a-f]+)_', fname)
+                if seg_match:
+                    seg_hex = '0x' + seg_match.group(1)
+                    args = re.sub(r',\s*' + re.escape(seg_hex) + r'\b', '', args)
+                    args = re.sub(r'\b' + re.escape(seg_hex) + r'\s*,\s*', '', args)
                 args = convert_expression(args)
                 return f'{indent}{pascal_fname}({args});'
             return f'{indent}{pascal_fname};'

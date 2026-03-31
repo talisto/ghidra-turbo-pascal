@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `pascal_emit/pipeline.py`: global variable declarations for data segment addresses — the `0xNN, unaff_DS` → `g_XXXX` conversion (introduced in v2.7.0) now automatically declares `g_XXXX` variables in the `var` block, even when they originate from function arguments rather than pointer dereferences
+- `pascal_emit/pipeline.py`: cross-segment stub parameter padding — when call sites pass more arguments than the IR function definition reports (due to seg:off expansion), stubs are padded with extra `Integer` parameters to match, with collision-safe naming
+
+### Fixed
+- `pascal_emit/body_converter.py`: far call segment constants stripped from function call arguments — for `FUN_SSSS_xxxx(offset, 0xSSSS, ...)` calls, the segment value `0xSSSS` is now automatically removed, reducing argument count mismatches between call sites and stub declarations
+- `pascal_emit/pipeline.py`: cross-segment stubs no longer use `var` parameters — call sites pass literal offsets (from seg:off expansion), not variable references, so `var` qualification is stripped to avoid "Variable identifier expected" errors
+
 ## [2.8.0] - 2026-03-30
 
 ### Fixed

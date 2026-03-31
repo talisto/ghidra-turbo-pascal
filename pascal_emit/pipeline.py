@@ -424,6 +424,22 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
         if f'g_{k[2:].zfill(4).upper()}' in all_pascal_text
     )
 
+    # Also detect g_XXXX references from unaff_DS conversion (expressions.py)
+    # These won't appear in _detect_globals() since they come from function
+    # arguments (0xNN, unaff_DS), not pointer dereferences (*(int *)0xNN)
+    existing_values = {int(k, 16) for k in referenced_globals}
+    _G_REF_RE = re.compile(r'\bg_([0-9A-F]{4})\b')
+    for m in _G_REF_RE.finditer(all_pascal_text):
+        int_val = int(m.group(1), 16)
+        if int_val not in existing_values:
+            hex_offset = '0x' + m.group(1).lower()
+            referenced_globals[hex_offset] = 'int'
+            existing_values.add(int_val)
+    # Re-sort by offset
+    referenced_globals = OrderedDict(
+        sorted(referenced_globals.items(), key=lambda x: int(x[0], 16))
+    )
+
     # Generate stubs for cross-segment Proc_ references not declared
     declared_procs = {f['pascal_name'] for f in pascal_funcs}
     proc_refs = set(re.findall(r'\bProc_[0-9a-fA-F]+_[0-9a-fA-F]+\b', all_pascal_text))
@@ -442,9 +458,34 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
         has_args_call = re.search(re.escape(pname) + r'\s*\(', all_pascal_text)
         ir_fn = ir_by_name.get(pname)
         if has_args_call and ir_fn:
-            params = _extract_params(ir_fn)
-            # Force procedure (not function) for stubs — body converter uses Proc_ prefix
+            # Strip 'var' from stub params — call sites often pass literal
+            # offsets (from seg:off expansion), not variable references
+            params = [(t, n, False) for t, n, _ in _extract_params(ir_fn)]
+            # Count max args at call sites to detect param count mismatch
+            call_args = re.findall(
+                re.escape(pname) + r'\s*\(([^)]+)\)', all_pascal_text)
+            if call_args:
+                max_args = max(
+                    len(re.split(r',(?![^(]*\))', a)) for a in call_args)
+                # If call sites have more args than IR definition, pad with
+                # extra Integer params (leftover segment/offset values)
+                existing_names = {n for _, n, _ in params}
+                pad_idx = len(params) + 1
+                while len(params) < max_args:
+                    while f'param_{pad_idx}' in existing_names:
+                        pad_idx += 1
+                    params.append(('int', f'param_{pad_idx}', False))
+                    pad_idx += 1
             _, decl, _, _ = make_pascal_signature('void', ir_fn['name'], params)
+        elif has_args_call:
+            # No IR function — generate params from call site arg count
+            call_args = re.findall(
+                re.escape(pname) + r'\s*\(([^)]+)\)', all_pascal_text)
+            max_args = max(
+                len(re.split(r',(?![^(]*\))', a)) for a in call_args)
+            params = [('int', f'param_{i + 1}', False)
+                      for i in range(max_args)]
+            _, decl, _, _ = make_pascal_signature('void', pname, params)
         else:
             decl = f'procedure {pname};'
         stub_funcs.append({
