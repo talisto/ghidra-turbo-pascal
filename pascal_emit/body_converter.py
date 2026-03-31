@@ -20,6 +20,9 @@ _LABEL_TO_PASCAL = {
     'bp_textcolor': 'TextColor',
     'bp_textbackground': 'TextBackground',
     'bp_ioresult': 'IOResult',
+    'crt_wherex_impl': 'WhereX',
+    'crt_wherey_impl': 'WhereY',
+    'crt_gotoxy_impl': 'GotoXY',
 }
 
 
@@ -80,11 +83,16 @@ NOISE_PATTERNS = [
 ]
 
 
-def is_noise_line(line):
+def is_noise_line(line, referenced_uvars=None):
     """Check if a line should be stripped as noise."""
     stripped = line.strip()
     if not stripped:
         return False
+    # Preserve uVar assignments when the variable is referenced elsewhere
+    if referenced_uvars:
+        m = re.match(r'^\s*uVar(\d+)\s*=', stripped)
+        if m and m.group(1) in referenced_uvars:
+            return False
     for pat in NOISE_PATTERNS:
         if pat.search(stripped):
             return True
@@ -527,6 +535,21 @@ def convert_function_body(body, strings_db, func_info, exe_reader=None):
             consumed.add(k)
         write_replacements[start] = stmt
 
+    # Pre-scan: find uVar names referenced outside their own assignments
+    # to avoid stripping assignments that are actually used
+    _uvar_assign_re = re.compile(r'^\s*uVar(\d+)\s*=')
+    _uvar_ref_re = re.compile(r'\buVar(\d+)\b')
+    referenced_uvars = set()
+    for line in lines:
+        s = line.strip()
+        # Skip declaration lines and assignment lines
+        if _uvar_assign_re.match(s):
+            continue
+        if re.match(r'^\s*(?:word|undefined2|dword)\s+uVar\d+', s):
+            continue
+        for m in _uvar_ref_re.finditer(s):
+            referenced_uvars.add(m.group(1))
+
     # Phase 2: Collect non-consumed, non-noise lines with their type
     c_lines = []
     for i, line in enumerate(lines):
@@ -559,7 +582,7 @@ def convert_function_body(body, strings_db, func_info, exe_reader=None):
                     break  # New block opened after halt — stop
             break
 
-        if is_noise_line(line):
+        if is_noise_line(line, referenced_uvars):
             continue
 
         if is_system_init_line(line):
@@ -947,6 +970,15 @@ def convert_c_line(line, func_info):
             return None
         if fname == 'bp_halt':
             return f'{indent}Halt;'
+        # Setter-style calls: crt_textattr_set(value) → TextAttr := value
+        _SETTER_MAP = {'crt_textattr_set': 'TextAttr'}
+        if fname in _SETTER_MAP:
+            var_name = _SETTER_MAP[fname]
+            args_match = re.search(r'\((.+)\)', line)
+            if args_match:
+                val = convert_expression(args_match.group(1))
+                return f'{indent}{var_name} := {val};'
+            return None
         # Library label → Pascal builtin
         if fname in _LABEL_TO_PASCAL:
             pascal_name = _LABEL_TO_PASCAL[fname]

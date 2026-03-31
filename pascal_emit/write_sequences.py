@@ -5,10 +5,30 @@ from .expressions import convert_expression
 
 _ANNOTATION_RE = re.compile(r'\s*/\*.*?\*/')
 
+# bp_*/crt_* function names that have known Pascal equivalents and can be inlined
+_INLINABLE_FUNCS = {
+    'bp_random', 'bp_randomize', 'bp_chr', 'bp_ord', 'bp_length',
+    'bp_copy', 'bp_pos', 'bp_concat', 'bp_upcase', 'bp_hi', 'bp_lo',
+    'bp_swap', 'bp_sizeof', 'bp_paramcount', 'bp_paramstr',
+    'bp_keypressed', 'bp_readkey', 'bp_filepos', 'bp_filesize',
+    'bp_eof', 'bp_eoln', 'bp_ioresult',
+    'crt_wherex_impl', 'crt_wherey_impl', 'crt_gotoxy_impl',
+}
+_UNRESOLVABLE_CALL_RE = re.compile(r'\b(?:bp_|crt_|FUN_|dos_|ddp_)\w+\s*\(')
+
 
 def _strip_annotation(val):
     """Strip /* ... */ string annotations from a value."""
     return _ANNOTATION_RE.sub('', val).strip()
+
+
+def _is_inlinable_value(val):
+    """Check if a temp var value is safe to inline into a Write argument."""
+    for m in _UNRESOLVABLE_CALL_RE.finditer(val):
+        fname = m.group(0).rstrip('( ')
+        if fname not in _INLINABLE_FUNCS:
+            return False
+    return True
 
 
 # Patterns for Write/WriteLn-related calls
@@ -110,6 +130,8 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
         # Collect DAT_ annotations and values for position-based string lookup
         dat_annotations = []
         dat_values = []
+        # Track temp variable assignments (uVarN/iVarN = expr) for inlining
+        temp_vars = {}
 
         # Scan ahead to see if this is part of a write sequence
         j = i
@@ -173,6 +195,9 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
                 if m:
                     width = int(m.group(1))
                     value = m.group(2).strip()
+                    inlined = temp_vars.get(value)
+                    if inlined and _is_inlinable_value(inlined):
+                        value = inlined
                     value = convert_expression(value)
                     if width > 0:
                         parts.append(f'{value}:{width}')
@@ -183,6 +208,9 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
                     if m2:
                         width = int(m2.group(1))
                         value = m2.group(2).strip()
+                        inlined = temp_vars.get(value)
+                        if inlined and _is_inlinable_value(inlined):
+                            value = inlined
                         value = convert_expression(value)
                         if width > 0:
                             parts.append(f'{value}:{width}')
@@ -377,7 +405,11 @@ def detect_write_sequences(lines, strings_db, exe_reader=None):
             if re.match(r'^[iu]Var\d+\s*=', jline):
                 val_match = re.search(r'=\s*(.+?)\s*;', jline)
                 if val_match:
-                    dat_values.append(_strip_annotation(val_match.group(1)))
+                    val = _strip_annotation(val_match.group(1))
+                    dat_values.append(val)
+                    # Track assignment for inlining when used as write arg
+                    var_name = jline.split('=')[0].strip()
+                    temp_vars[var_name] = val
                 j += 1
                 continue
 

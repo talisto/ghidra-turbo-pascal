@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `pascal_emit/body_converter.py`: CRT function converters — `crt_wherex_impl` → `WhereX`, `crt_wherey_impl` → `WhereY`, `crt_gotoxy_impl` → `GotoXY` in `_LABEL_TO_PASCAL`, plus `crt_textattr_set(value)` → `TextAttr := value` setter conversion
+- `pascal_emit/expressions.py`: CRT functions added to `_EXPR_LABEL_MAP` for expression contexts; parameterless function argument stripping for `WhereX`, `WhereY`, `ReadKey`, `KeyPressed`, `ParamCount`, `Randomize`
+- `pascal_emit/write_sequences.py`: temp variable inlining — when a write call uses `uVar1` as its value, substitute the actual expression (e.g., `Random(100)`) from the preceding assignment, with safety check to only inline known convertible functions
+- `pascal_emit/body_converter.py`: preserve `uVar` assignments when the variable is referenced elsewhere in the function body (prevents stripping assignments to variables used in Write calls)
+
+### Fixed
+- `pascal_emit/write_sequences.py`: strip `/* "..." */` string annotations from dat_values before expression conversion — prevents garbled output like `990 div * "Hello World" * div:108` when annotated hex constants flow through the expression converter
+- `pascal_emit/body_converter.py`: comment out orphaned `Break` statements that end up outside any loop context after `_sanitize_ghidra_artifacts` empties loop bodies containing pointer variable references
+
+### Changed
+- PROCFUNC now compiles (15/16 programs = 93.75%, up from 87.5%)
+- RANDTEST Write calls now show `Random(100)` instead of uninitialized `uVar1`
+- CRTTEST now correctly emits `WhereX`, `WhereY`, and `TextAttr :=` instead of raw `crt_*` function calls
+
 ## [2.14.0] - 2026-03-30
 
 ### Fixed

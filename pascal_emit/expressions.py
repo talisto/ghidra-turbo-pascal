@@ -111,9 +111,17 @@ def convert_expression(expr):
         'bp_filepos': 'FilePos', 'bp_filesize': 'FileSize',
         'bp_eof': 'Eof', 'bp_eoln': 'Eoln',
         'bp_ioresult': 'IOResult',
+        'crt_wherex_impl': 'WhereX', 'crt_wherey_impl': 'WhereY',
+        'crt_gotoxy_impl': 'GotoXY',
     }
     for old, new in _EXPR_LABEL_MAP.items():
         expr = re.sub(r'\b' + re.escape(old) + r'\b', new, expr)
+
+    # Parameterless functions: strip any spurious Ghidra arguments
+    _NOARG_FUNCS = ('WhereX', 'WhereY', 'ReadKey', 'KeyPressed',
+                    'ParamCount', 'Randomize')
+    for fn in _NOARG_FUNCS:
+        expr = re.sub(r'\b' + fn + r'\s*\([^)]*\)', fn, expr)
 
     # Shift operators → shl/shr
     expr = re.sub(r'(\w+)\s*<<\s*(\d+)', r'\1 shl \2', expr)
