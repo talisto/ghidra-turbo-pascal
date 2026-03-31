@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-03-30
+
+### Added
+- `pascal_emit/expressions.py`: shared `_C_PTR_TYPES` constant extending C pointer type patterns to include `dword`, `short`, `ushort`, `long`, `ulong` — all pointer cast regexes now handle these types
+- `pascal_emit/expressions.py`: combined cast+deref pattern `(type)*var` → `Type(var)` — converts expressions like `(int)*(dword *)param_1` to `Integer(param_1)`
+- `pascal_emit/pipeline.py`: post-conversion safety pass (`_comment_out_unsafe_lines`) that comments out lines containing unconverted C pointer dereferences (`*(type *)expr`) and scalar assignments to array-typed variables
+
+### Fixed
+- `pascal_emit/body_converter.py`: moved return statement handler before variable declaration pattern — prevents `return local_6;` from being misinterpreted as `{ var local_6: return; }` when `return` matches the `type varname;` pattern
+- `pascal_emit/pipeline.py`: unsafe line detection strips `{ ... }` comment sections before checking for C pointer syntax — prevents double-commenting lines that contain already-commented C fragments
+
+### Changed
+- RECORDS now compiles (13/16 programs = 81.25%, up from 75%)
+
 ## [2.11.0] - 2026-03-30
 
 ### Added

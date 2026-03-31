@@ -3,6 +3,9 @@ import re
 
 from .types import c_type_to_pascal
 
+# C types that appear in pointer casts: *(TYPE *)addr, (TYPE *)var
+_C_PTR_TYPES = r'(?:int|uint|word|byte|char|dword|short|ushort|long|ulong)'
+
 
 def convert_expression(expr):
     """Convert a C expression to Pascal expression."""
@@ -14,25 +17,39 @@ def convert_expression(expr):
 
     # Memory access: *(int *)0xNN → g_00NN
     expr = re.sub(
-        r'\*\((?:int|uint|word|byte|char) \*\)(0x[0-9a-f]+)',
+        r'\*\(' + _C_PTR_TYPES + r' \*\)(0x[0-9a-f]+)',
         lambda m: f'g_{m.group(1)[2:].zfill(4).upper()}',
         expr
     )
     # *(int *)(param_N + offset) → param_N[offset]  (indexed access)
     # Offset may be hex (0xNN) or decimal
     expr = re.sub(
-        r'\*\((?:int|uint|word|byte|char) \*\)\((\w+) \+ (0x[0-9a-f]+|\d+)\)',
+        r'\*\(' + _C_PTR_TYPES + r' \*\)\((\w+) \+ (0x[0-9a-f]+|\d+)\)',
         lambda m: f'{m.group(1)}[{int(m.group(2), 0)}]',
         expr
     )
     # *(int *)(param_N + -offset) → param_N[-offset]  (negative indexed access)
     expr = re.sub(
-        r'\*\((?:int|uint|word|byte|char) \*\)\((\w+) \+ (-(?:0x[0-9a-f]+|\d+))\)',
+        r'\*\(' + _C_PTR_TYPES + r' \*\)\((\w+) \+ (-(?:0x[0-9a-f]+|\d+))\)',
         lambda m: f'{m.group(1)}[{int(m.group(2), 0)}]',
         expr
     )
     # (type *)variable → variable  (pointer cast — drop for var params)
-    expr = re.sub(r'\((?:int|uint|word|byte|char) \*\)(\w+)', r'\1', expr)
+    expr = re.sub(r'\(' + _C_PTR_TYPES + r' \*\)(\w+)', r'\1', expr)
+    # (type)*(type *)variable → Type(variable)  (cast + deref + pointer cast)
+    # Must be before the general deref pattern since ) before * blocks it
+    _CAST_DEREF_MAP = {
+        'int': 'Integer', 'uint': 'Word', 'ushort': 'Word',
+        'byte': 'Byte', 'char': 'Char', 'word': 'Word',
+        'dword': 'LongInt', 'ulong': 'LongInt', 'short': 'Integer',
+        'long': 'LongInt',
+    }
+    def _cast_deref(m):
+        ctype = m.group(1)
+        var = m.group(2)
+        pascal_type = _CAST_DEREF_MAP.get(ctype, 'Integer')
+        return f'{pascal_type}({var})'
+    expr = re.sub(r'\((\w+)\)\*(\w+)', _cast_deref, expr)
     # *variable → variable  (pointer deref on var params — var already dereferences)
     # Only match when * is not preceded by identifier/digit/close-paren (not multiplication)
     expr = re.sub(r'(?<![a-zA-Z0-9_)\]])\*(\w+)', r'\1', expr)

@@ -27,7 +27,7 @@ _FLIRT_RE = [
     re.compile(r'^__[A-Z]'),
 ]
 
-_GLOBAL_MEM_RE = re.compile(r'\*\((int|uint|word|byte|char) \*\)(0x[0-9a-f]+)')
+_GLOBAL_MEM_RE = re.compile(r'\*\((int|uint|word|byte|char|dword|short|ushort|long|ulong) \*\)(0x[0-9a-f]+)')
 
 
 def _sanitize_ghidra_name(name):
@@ -179,6 +179,46 @@ _TEMP_VAR_TYPES = {
     'c': 'Byte',
     'b': 'Byte',
 }
+
+# Pattern matching unconverted C pointer dereferences in Pascal output
+_UNSAFE_C_RE = re.compile(r'\*\s*\(\s*\w+\s*\*')
+
+
+def _comment_out_unsafe_lines(body, array_vars=None):
+    """Comment out lines that contain unconverted C constructs.
+
+    Detects:
+    - Remaining C pointer dereferences: *(type *)expr
+    - Scalar assignments to array-typed variables
+    """
+    if array_vars is None:
+        array_vars = set()
+    lines = body.split('\n')
+    result = []
+    for line in lines:
+        stripped = line.strip()
+        # Skip already-commented lines
+        if stripped.startswith('{ ') and stripped.endswith(' }'):
+            result.append(line)
+            continue
+        # Strip out { ... } comment sections before checking for unsafe C
+        uncommented = re.sub(r'\{[^}]*\}', '', stripped)
+        # Check for unconverted C pointer dereferences in uncommented text
+        if _UNSAFE_C_RE.search(uncommented):
+            result.append(line.replace(stripped, '{ ' + stripped + ' }'))
+            continue
+        # Check for scalar assignment to array-typed variable
+        if array_vars:
+            assign_m = re.match(r'(\w+)\s*:=\s*.+;$', stripped)
+            if assign_m and assign_m.group(1) in array_vars:
+                # Only comment out if the RHS is not an array constructor
+                rhs = stripped[stripped.index(':=') + 2:].strip().rstrip(';')
+                # If RHS doesn't contain array indexing, it's a scalar assignment
+                if '[' not in rhs:
+                    result.append(line.replace(stripped, '{ ' + stripped + ' }'))
+                    continue
+        result.append(line)
+    return '\n'.join(result)
 
 
 def _collect_undeclared_temps(body_text):
@@ -563,6 +603,13 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
         for func in pascal_funcs:
             func['body'] = _fix_empty_proc_calls(
                 func['body'], proc_param_info)
+
+    # Comment out lines with unconverted C pointer syntax or scalar→array assigns
+    for func in pascal_funcs:
+        array_vars = {name for name, typ in func['local_vars']
+                      if typ.startswith('array[')}
+        func['body'] = _comment_out_unsafe_lines(func['body'], array_vars)
+    main_body = _comment_out_unsafe_lines(main_body)
 
     # Emit
     pascal_text = emit_pascal(program_name, uses, referenced_globals, pascal_funcs,

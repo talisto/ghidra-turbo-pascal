@@ -737,6 +737,18 @@ def convert_c_line(line, func_info):
 
     indent = '  '
 
+    # Return statement with value (function result) — must be before var_decl
+    ret_match = re.match(r'^return\s+(.+?)\s*;$', line)
+    if ret_match:
+        value = convert_expression(ret_match.group(1))
+        if func_info.get('is_function'):
+            return f'{indent}{func_info["pascal_name"]} := {value};'
+        return None
+
+    # Return void
+    if line == 'return;':
+        return None
+
     # Variable declarations (local vars)
     var_decl = re.match(r'^(\w+)\s+(\w+)\s*;$', line)
     if var_decl:
@@ -772,18 +784,6 @@ def convert_c_line(line, func_info):
     # Closing brace
     if line == '}' or line == '};':
         return f'{indent}end;'
-
-    # Return statement with value (function result)
-    ret_match = re.match(r'^return\s+(.+?)\s*;$', line)
-    if ret_match:
-        value = convert_expression(ret_match.group(1))
-        if func_info.get('is_function'):
-            return f'{indent}{func_info["pascal_name"]} := {value};'
-        return None
-
-    # Return void
-    if line == 'return;':
-        return None
 
     # if statement
     if_match = re.match(r'^if\s*\((.+?)\)\s*\{?\s*$', line)

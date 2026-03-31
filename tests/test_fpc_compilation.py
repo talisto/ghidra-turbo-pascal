@@ -55,6 +55,7 @@ COMPILING_PROGRAMS = {
     'MATHOPS',
     'OVRTEST',
     'RANDTEST',
+    'RECORDS',
     'STRINGS',
     'TYPECAST',
 }
@@ -64,7 +65,6 @@ EXPECTED_FAILURES = {
     'FILEIO',
     'PROCFUNC',
     'PTRMEM',
-    'RECORDS',
 }
 
 
