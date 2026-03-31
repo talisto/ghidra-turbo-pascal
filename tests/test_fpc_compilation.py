@@ -159,6 +159,7 @@ CLEAN_PROGRAMS = {
     'HELLO',
     'MATHOPS',
     'OVRTEST',
+    'RANDTEST',
     'TYPECAST',
 }
 
@@ -166,9 +167,9 @@ CLEAN_PROGRAMS = {
 # Move to CLEAN_PROGRAMS when all commented lines are resolved.
 INCOMPLETE_PROGRAMS = {
     'DOSTEST',
+    'FILEIO',
     'PROCFUNC',
     'PTRMEM',
-    'RANDTEST',
     'RECORDS',
     'STRINGS',
 }

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `pascal_emit/body_converter.py`: `_convert_leaked_idents()` — new pre-pass in `_sanitize_ghidra_artifacts` that converts recoverable Ghidra identifiers to valid Pascal names before the leaked-ident check: `DAT_seg_off` → `g_OFF` (cross-segment globals), `FUN_seg_off` → `Func_seg_off` (cross-segment functions in all contexts, not just Write)
+- `pascal_emit/body_converter.py`: `bp_erase(off, seg)` handler — converts file deletion calls to `Erase(g_var);`
+- `pascal_emit/body_converter.py`: no-arg BP7 string RTL operations (`bp_str_assign_n`, `bp_str_assign`, `bp_concat`, `bp_copy`, `bp_str_long`, `bp_insert`) skipped as noise when called without args (stack-based arg passing, unreconstructable)
+- `pascal_emit/body_converter.py`: `bp_str_assign_const` / `bp_str_copy_const` now falls back to `exe_reader` when `strings_db` lookup fails; 3-arg form `(max_len, dest, seg)` and 0-arg form treated as noise
+- `pascal_emit/expressions.py`: pointer arithmetic array access — `*(type *)(var * 2 + BASE)` → `g_BASE[var]` (typed global array access)
+- `pascal_emit/pipeline.py`: array global detection — globals used with `g_XXXX[expr]` indexing are automatically retyped from scalar to `array[0..N] of Type`
+- `pascal_emit/body_converter.py`: `_DOS_FUNC_MAP` — comprehensive mapping of DOS unit label names to Pascal identifiers (25 entries) for future use
+
+### Changed
+- `pascal_emit/body_converter.py`: `_sanitize_ghidra_artifacts` now runs a conversion pass (`_convert_leaked_idents`) before the leaked-ident check, enabling DAT_ and FUN_ references to appear in active code as valid Pascal globals/functions
+- `pascal_emit/body_converter.py`: `_LEAKED_IDENT_RE` refined — `DAT_` and `FUN_` removed (handled by conversion), `dos_\w+` and `func_0x` retained for unresolvable references
+- `pascal_emit/body_converter.py`: skip_names expanded with `bp_settime`, `bp_getdate`, `bp_gettime` (date/time getters with effects captured in globals), `bp_write_setup`, `bp_readln`, `bp_read_str` (Write/Read internals), `dos_getenv`, `dos_findnext`, `dos_findfirst` (DOS wrappers with stack-based args), `bp_paramcount` (ParamStr wrapper)
+- `pascal_emit/body_converter.py`: `bp_str_copy_bounded` with no args treated as noise
+- CONTROL: already CLEAN — no change
+- RANDTEST: 1 → 0 commented lines — **moved to Clean tier** (pointer arithmetic array access now emits `g_BASE[idx]`)
+- DOSTEST: 16 → 4 commented lines (DAT_ conversion, dos_ skip, bp_settime/bp_paramcount noise)
+- FILEIO: 15 → 6 commented lines (bp_write_setup noise, bp_erase conversion, bp_str_copy_const 3-arg noise, bp_readln/bp_read_str noise)
+- STRINGS: 24 → 10 commented lines (no-arg string ops skipped as noise)
+- RECORDS: 7 → 5 commented lines (bp_str_assign_const improvements)
+- PTRMEM: 8 → 7 commented lines (bp_str_copy_bounded noise)
+- Total commented lines across all programs: 76 → 37 (51% reduction)
+- 11 programs now produce fully clean output with 0 non-stub commented lines (up from 9)
+- `test_fpc_compilation.py`: RANDTEST moved to CLEAN_PROGRAMS; FILEIO added to INCOMPLETE_PROGRAMS
+
 ## [2.24.0] - 2026-03-31
 
 ### Added

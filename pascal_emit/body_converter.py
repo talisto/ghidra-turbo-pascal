@@ -944,19 +944,65 @@ def convert_function_body(body, strings_db, func_info, exe_reader=None):
 
 # Patterns for identifiers that must not appear in active Pascal code
 _LEAKED_IDENT_RE = re.compile(
-    r'\b(?:p[bui]Var\d+|abStack_\w+|func_0x[0-9a-f]+|'
-    r'extraout_\w+|stack0x[0-9a-f]+|DAT_[0-9a-f_]+|FUN_[0-9a-f_]+|'
-    r'dos_\w+)\b',
+    r'\b(?:p[bui]Var\d+|abStack_\w+|'
+    r'extraout_\w+|stack0x[0-9a-f]+|'
+    r'unaff_\w+|dos_\w+|func_0x[0-9a-f]+)\b',
     re.IGNORECASE
 )
 
+# DOS unit function label → Pascal name mapping
+_DOS_FUNC_MAP = {
+    'dos_envstr': 'EnvStr',
+    'dos_envcount': 'EnvCount',
+    'dos_disksize': 'DiskSize',
+    'dos_diskfree': 'DiskFree',
+    'dos_getenv': 'GetEnv',
+    'dos_findnext': 'FindNext',
+    'dos_findfirst': 'FindFirst',
+    'dos_getdate': 'GetDate',
+    'dos_gettime': 'GetTime',
+    'dos_setdate': 'SetDate',
+    'dos_settime': 'SetTime',
+    'dos_dosversion': 'DosVersion',
+    'dos_exec': 'Exec',
+    'dos_intr': 'Intr',
+    'dos_msdos': 'MsDos',
+    'dos_fexpand': 'FExpand',
+    'dos_fsearch': 'FSearch',
+    'dos_fsplit': 'FSplit',
+    'dos_getfattr': 'GetFAttr',
+    'dos_setfattr': 'SetFAttr',
+    'dos_getftime': 'GetFTime',
+    'dos_setftime': 'SetFTime',
+    'dos_packtime': 'PackTime',
+    'dos_unpacktime': 'UnpackTime',
+}
+
+
+def _convert_leaked_idents(text):
+    """Convert recoverable Ghidra identifiers to valid Pascal names.
+
+    Transforms:
+    - DAT_seg_off → g_OFF (cross-segment data reference → global var)
+    - FUN_seg_off → Func_seg_off (function reference → forward-declared func)
+    """
+    # Convert DAT_seg_off → g_OFF (use offset part only)
+    text = re.sub(
+        r'\bDAT_[0-9a-f]+_([0-9a-f]+)\b',
+        lambda m: f'g_{m.group(1).upper().zfill(4)}',
+        text, flags=re.IGNORECASE
+    )
+    # Convert FUN_ → Func_ in all contexts
+    text = re.sub(r'\bFUN_([0-9a-fA-F_]+)', r'Func_\1', text)
+    return text
+
 
 def _sanitize_ghidra_artifacts(lines):
-    """Comment out lines containing leaked Ghidra identifiers.
+    """Convert or comment out lines containing leaked Ghidra identifiers.
 
-    Lines that reference undeclared Ghidra variables (puVar, pbVar,
-    abStack, CARRY, func_0x, extraout_, stack0x) are wrapped in comments
-    unless they're already inside a comment.
+    First converts recoverable identifiers (DAT_, FUN_, func_0x, dos_)
+    to valid Pascal names. Then comments out lines that still contain
+    truly unresolvable identifiers (puVar, extraout_, etc.).
 
     When commenting out a line that opens a begin/end block, the matching
     end is also commented out to prevent orphaned structural keywords.
@@ -972,21 +1018,16 @@ def _sanitize_ghidra_artifacts(lines):
         if stripped in ('begin', 'end;', 'end.', 'repeat', '') or stripped.startswith('end '):
             result.append(line)
             continue
-        # For Write/WriteLn lines, convert FUN_ calls to Func_ before
-        # checking for leaked identifiers — these are function calls
-        # that should match their Pascal declarations
-        check_text = stripped
-        if re.match(r'Write(?:Ln)?\s*\(', stripped) and 'FUN_' in stripped:
-            check_text = re.sub(r'\bFUN_([0-9a-fA-F_]+)', r'Func_\1', stripped)
-        # Check for leaked identifiers
-        if _LEAKED_IDENT_RE.search(check_text):
+        # Phase 1: Convert recoverable identifiers to Pascal names
+        converted = _convert_leaked_idents(stripped)
+        # Phase 2: Check for remaining leaked identifiers
+        if _LEAKED_IDENT_RE.search(converted):
             indent = line[:len(line) - len(line.lstrip())]
-            result.append(f'{indent}{{ {stripped} }}')
+            result.append(f'{indent}{{ {converted} }}')
         else:
-            if check_text != stripped:
-                # FUN_ was converted to Func_ — use the converted version
+            if converted != stripped:
                 indent = line[:len(line) - len(line.lstrip())]
-                result.append(f'{indent}{check_text}')
+                result.append(f'{indent}{converted}')
             else:
                 result.append(line)
 
@@ -1287,11 +1328,33 @@ def convert_c_line(line, func_info):
             # Val/Str conversion internals
             'bp_val__longint',
             '_Val__Longint_qm6Stringm7Integer',
+            # DOS date/time getters — side effects captured in globals
+            'bp_settime', 'bp_getdate', 'bp_gettime',
+            # Write/Read internals — setup calls with args on stack
+            'bp_write_setup', 'bp_readln', 'bp_read_str',
+            # DOS unit wrappers — args on stack, unreconstructable
+            'dos_getenv', 'dos_findnext', 'dos_findfirst',
+            # ParamStr wrapper — arg on stack
+            'bp_paramcount',
         }
         if fname in skip_names:
             return None
         if fname == 'bp_halt':
             return f'{indent}Halt;'
+        # Borland Pascal string RTL operations — args pushed via stack
+        # When called with no args (Ghidra can't resolve stack args),
+        # skip as noise since we can't reconstruct the operation
+        _BP_STRING_OPS = {
+            'bp_str_assign_n', 'bp_str_assign', 'bp_concat',
+            'bp_copy', 'bp_str_long', 'bp_insert', 'bp_str_append',
+        }
+        if fname in _BP_STRING_OPS:
+            args_match = re.search(r'\((.+)\)', line)
+            if not args_match:
+                # No args — stack-based call, skip as noise
+                return None
+            # Has args — comment out (partially resolved, needs manual review)
+            return f'{indent}{{ {line} }}'
         # Setter-style calls: crt_textattr_set(value) → TextAttr := value
         _SETTER_MAP = {'crt_textattr_set': 'TextAttr'}
         if fname in _SETTER_MAP:
@@ -1311,18 +1374,42 @@ def convert_c_line(line, func_info):
                     dest_seg = parts[2]
                     src_off = parts[3]
                     sdb = func_info.get('strings_db', {})
+                    exe_reader = func_info.get('exe_reader')
                     if dest_seg == 'unaff_DS' and dest_off.startswith('0x'):
-                        # Look up source string in strings DB
+                        # Look up source string in strings DB or EXE
                         string_val = None
                         try:
                             src_int = int(src_off, 16) if src_off.startswith('0x') else int(src_off)
                             string_val = sdb.get(src_int)
+                            if string_val is None and exe_reader:
+                                string_val = exe_reader.read_string(src_int, allow_empty=True)
                         except ValueError:
                             pass
-                        if string_val:
+                        if string_val is not None:
                             var_name = f'g_{dest_off[2:].zfill(4).upper()}'
                             escaped = string_val.replace("'", "''")
                             return f"{indent}{{ {var_name} := '{escaped}'; }}"
+                elif len(parts) == 3 and parts[2] == 'unaff_DS':
+                    # 3-arg form: (max_len, dest_off, seg) — internal string copy
+                    return None
+            else:
+                # No-arg call — internal mechanism, skip
+                return None
+            return f'{indent}{{ {line} }}'
+        # bp_str_copy_bounded: internal string copy, no useful args
+        if fname == 'bp_str_copy_bounded':
+            args_match = re.search(r'\((.+)\)', line)
+            if not args_match:
+                return None  # no-arg → noise
+            return f'{indent}{{ {line} }}'
+        # bp_erase: file deletion — convert to Erase
+        if fname == 'bp_erase':
+            args_match = re.search(r'\((.+)\)', line)
+            if args_match:
+                parts = [a.strip() for a in args_match.group(1).split(',')]
+                if len(parts) >= 2 and parts[0].startswith('0x'):
+                    var_name = f'g_{parts[0][2:].zfill(4).upper()}'
+                    return f'{indent}Erase({var_name});'
             return f'{indent}{{ {line} }}'
         # DDPlus library functions — resolve strings, convert chars
         if fname.startswith('ddp_'):

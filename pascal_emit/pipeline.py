@@ -637,6 +637,28 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
             func['body'] = _uncomment_str_assigns(
                 func['body'], string_globals)
 
+    # Detect globals used with array indexing and retype them
+    _ARRAY_GLOBAL_RE = re.compile(r'\bg_([\dA-F]{4})\[([^\]]+)\]')
+    array_globals = {}  # g_XXXX → max observed index
+    for m in _ARRAY_GLOBAL_RE.finditer(all_pascal_text):
+        gname = f'g_{m.group(1)}'
+        try:
+            idx = int(m.group(2))
+            if gname not in array_globals or idx > array_globals[gname]:
+                array_globals[gname] = idx
+        except ValueError:
+            # Dynamic index — use a default upper bound
+            if gname not in array_globals:
+                array_globals[gname] = 9
+    if array_globals:
+        for offset in list(referenced_globals):
+            gname = f'g_{offset[2:].zfill(4).upper()}'
+            if gname in array_globals:
+                hi = max(array_globals[gname], 1)
+                base_type = referenced_globals[offset]
+                ptype = c_type_to_pascal(base_type) or 'Integer'
+                referenced_globals[offset] = f'array[0..{hi}] of {ptype}'
+
     # Generate stubs for cross-segment Proc_ references not declared
     declared_procs = {f['pascal_name'] for f in pascal_funcs}
     proc_refs = set(re.findall(r'\bProc_[0-9a-fA-F]+_[0-9a-fA-F]+\b', all_pascal_text))

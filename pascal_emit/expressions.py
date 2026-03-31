@@ -21,6 +21,17 @@ def convert_expression(expr):
         lambda m: f'g_{m.group(1)[2:].zfill(4).upper()}',
         expr
     )
+    # Array via pointer arithmetic: *(type *)(var * ELEM_SIZE + BASE_ADDR)
+    # → g_BASE[var]  (typed array access on a global array)
+    def _ptr_arith_array(m):
+        var = m.group(1)
+        base_hex = m.group(2)
+        base = int(base_hex, 0)
+        return f'g_{base:04X}[{var}]'
+    expr = re.sub(
+        r'\*\(' + _C_PTR_TYPES + r' \*\)\((\w+) \* 2 \+ (0x[0-9a-f]+|\d+)\)',
+        _ptr_arith_array, expr
+    )
     # *(int *)(param_N + offset) → param_N[offset]  (indexed access)
     # Offset may be hex (0xNN) or decimal
     expr = re.sub(
