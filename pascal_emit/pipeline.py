@@ -198,6 +198,27 @@ def _collect_undeclared_temps(body_text):
     return result
 
 
+def _fix_empty_proc_calls(body, proc_param_counts):
+    """Fix procedure calls with missing arguments.
+
+    When Ghidra can't resolve BP7 stack-based argument passing, it emits
+    FUN_xxxx() with no args, but the procedure actually has parameters.
+    Add placeholder 0 args to match the declaration's param count.
+    """
+    if not proc_param_counts:
+        return body
+    lines = body.split('\n')
+    result = []
+    for line in lines:
+        stripped = line.strip().rstrip(';')
+        if stripped in proc_param_counts:
+            count = proc_param_counts[stripped]
+            if count > 0:
+                placeholders = ', '.join(['0'] * count)
+                line = line.replace(stripped + ';', f'{stripped}({placeholders});')
+        result.append(line)
+    return '\n'.join(result)
+
 def _detect_globals(bodies):
     """Scan function bodies for global memory accesses.
 
@@ -496,6 +517,25 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
             'local_vars': [],
         })
     pascal_funcs = stub_funcs + pascal_funcs
+
+    # Build map of procedure names to required param counts for fixing
+    # empty calls (Ghidra emits FUN_xxxx() with no args when it can't
+    # resolve BP7 stack-based argument passing)
+    proc_param_counts = {}
+    for func in pascal_funcs:
+        pname = func['pascal_name']
+        decl = func['declaration']
+        # Count params from declaration: procedure Name(p1: T; p2: T);
+        param_match = re.search(r'\(([^)]+)\)', decl)
+        if param_match:
+            proc_param_counts[pname] = len(param_match.group(1).split(';'))
+
+    # Fix procedure calls with missing arguments (placeholder 0 values)
+    if proc_param_counts:
+        main_body = _fix_empty_proc_calls(main_body, proc_param_counts)
+        for func in pascal_funcs:
+            func['body'] = _fix_empty_proc_calls(
+                func['body'], proc_param_counts)
 
     # Emit
     pascal_text = emit_pascal(program_name, uses, referenced_globals, pascal_funcs,

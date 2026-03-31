@@ -47,6 +47,7 @@ def get_all_pas_programs():
 COMPILING_PROGRAMS = {
     'CONTROL',
     'CRTTEST',
+    'DDTEST',
     'DOSTEST',
     'EXITPROC',
     'GAMESIM',
@@ -60,7 +61,6 @@ COMPILING_PROGRAMS = {
 
 # Programs that are expected to fail (not yet fixed)
 EXPECTED_FAILURES = {
-    'DDTEST',
     'FILEIO',
     'PROCFUNC',
     'PTRMEM',

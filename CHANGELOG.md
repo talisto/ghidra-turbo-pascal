@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `pascal_emit/expressions.py`: refactored `_convert_atomic_condition` to split on comparison operators and delegate each operand to `convert_expression` — eliminates ~50 lines of duplicated conversion logic and fixes missing sub-field accessor conversion (`var._1_1_` → `Byte(var)`) in conditions
+- `tests/test_fpc_compilation.py`: DDTEST moved from expected failures to compiling programs (12/16 now compile, 75%)
+
+### Added
+- `pascal_emit/pipeline.py`: empty procedure call fix — when Ghidra emits `FUN_xxxx()` with no arguments (can't resolve BP7 stack-based arg passing) but the procedure declaration has parameters, placeholder `0` values are added to match the param count
+
 ## [2.9.0] - 2026-03-30
 
 ### Added

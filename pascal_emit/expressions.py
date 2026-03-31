@@ -232,72 +232,25 @@ def convert_condition(cond):
 
 
 def _convert_atomic_condition(cond):
-    """Convert a single C condition (no &&/||) to Pascal."""
+    """Convert a single C condition (no &&/||) to Pascal.
+
+    Splits on comparison operators at depth 0 and delegates each
+    operand to convert_expression, avoiding duplicated conversion logic.
+    """
     cond = cond.strip()
 
-    # Char literals
-    cond = re.sub(r"'\\0'", '0', cond)
-    cond = re.sub(r"'\\x([0-9a-f]{2})'", lambda m: str(int(m.group(1), 16)), cond)
+    # Try comparison operators at depth 0 (longest first)
+    for c_op, pas_op in [('!=', ' <> '), ('==', ' = '),
+                          ('<=', ' <= '), ('>=', ' >= '),
+                          ('<', ' < '), ('>', ' > ')]:
+        parts = _split_at_depth0(cond, c_op)
+        if len(parts) == 2:
+            lhs = convert_expression(parts[0])
+            rhs = convert_expression(parts[1])
+            return f'{lhs}{pas_op}{rhs}'
 
-    # Memory access
-    cond = re.sub(
-        r'\*\((?:int|uint|word|byte|char) \*\)(0x[0-9a-f]+)',
-        lambda m: f'g_{m.group(1)[2:].zfill(4).upper()}',
-        cond
-    )
-    # Pointer casts and dereferences (same as convert_expression)
-    cond = re.sub(
-        r'\*\((?:int|uint|word|byte|char) \*\)\((\w+) \+ (-?(?:0x[0-9a-f]+|\d+))\)',
-        lambda m: f'{m.group(1)}[{int(m.group(2), 0)}]',
-        cond
-    )
-    cond = re.sub(r'\((?:int|uint|word|byte|char) \*\)(\w+)', r'\1', cond)
-    cond = re.sub(r'(?<![a-zA-Z0-9_)\]])\*(\w+)', r'\1', cond)
-
-    # C-style casts → Pascal type casts
-    cond = re.sub(r'\(ulong\)\(', 'LongInt(', cond)
-    cond = re.sub(r'\(uint\)\(', 'Word(', cond)
-    cond = re.sub(r'\(ushort\)\(', 'Word(', cond)
-    cond = re.sub(r'\(int\)\(', 'Integer(', cond)
-    cond = re.sub(r'\(byte\)\(', 'Byte(', cond)
-    cond = re.sub(r'\(char\)\(', 'Char(', cond)
-    cond = re.sub(r'\(word\)\(', 'Word(', cond)
-    cond = re.sub(r'\(dword\)\(', 'LongInt(', cond)
-    cond = re.sub(r'\(ulong\)(\w+)', r'LongInt(\1)', cond)
-    cond = re.sub(r'\(uint\)(\w+)', r'Word(\1)', cond)
-    cond = re.sub(r'\(ushort\)(\w+)', r'Word(\1)', cond)
-    cond = re.sub(r'\(int\)(\w+)', r'Integer(\1)', cond)
-    cond = re.sub(r'\(byte\)(\w+)', r'Byte(\1)', cond)
-    cond = re.sub(r'\(char\)(\w+)', r'Char(\1)', cond)
-    cond = re.sub(r'\(word\)(\w+)', r'Word(\1)', cond)
-    cond = re.sub(r'\(dword\)(\w+)', r'LongInt(\1)', cond)
-
-    # Hex constants → decimal
-    cond = re.sub(
-        r'\b0x([0-9a-f]+)\b',
-        lambda m: str(int(m.group(1), 16)),
-        cond
-    )
-
-    # Operators (order matters: multi-char before single-char)
-    cond = cond.replace('!=', ' <> ')
-    cond = cond.replace('==', ' = ')
-    cond = re.sub(r'\s*%\s*', ' mod ', cond)
-    cond = re.sub(r'\s*/\s*', ' div ', cond)
-    cond = re.sub(r'(?<!\w)~(\w)', r'not \1', cond)
-    # Replace double operators before single-char versions to avoid
-    # && → "and and" (each & replaced individually)
-    cond = re.sub(r'\s*&&\s*', ' and ', cond)
-    cond = re.sub(r'\s*\|\|\s*', ' or ', cond)
-    cond = re.sub(r'\s*&\s*', ' and ', cond)
-    cond = re.sub(r'\s*\|\s*', ' or ', cond)
-    cond = re.sub(r'\s*\^\s*', ' xor ', cond)
-    cond = re.sub(r'!(\w)', r'not \1', cond)
-
-    # Clean up
-    cond = re.sub(r'\s+', ' ', cond).strip()
-
-    return cond
+    # No comparison operator — bare boolean expression
+    return convert_expression(cond)
 
 
 def negate_condition(cond):
