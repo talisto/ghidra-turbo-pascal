@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-03-30
+
 ### Added
 - `pascal_emit/pipeline.py`: auto-detect array-typed temp variables — when a temp variable like `iVar1` is used with indexed access (`iVar1[21]`), it's declared as `array[0..N] of Integer` instead of `Integer`, fixing "Illegal qualifier" errors (RECORDS 24→3 errors)
 
@@ -275,7 +277,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `label_functions.py`: system segment detection now uses core offset counting instead of fixed markers (`3fca`/`3f65`) for broader compatibility
 - `label_functions.py`: FLIRT description table expanded with `t1`-style mangled names (e.g., `_GotoXY_q4Bytet1`)
 
-[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.10.0...HEAD
+[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.11.0...HEAD
+[2.11.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.7.0...v2.8.0
