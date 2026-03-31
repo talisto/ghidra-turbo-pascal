@@ -70,7 +70,7 @@ NOISE_PATTERNS = [
     # Leaked Ghidra identifiers in active code
     re.compile(r'^\s*(?:p[bui]Var\d+|abStack_\w+)\s*[=\[]'),
     re.compile(r'^\s*\*\s*(?:p[bui]Var\d+|abStack_\w+)'),
-    re.compile(r'^\s*(?:byte|word|int)\s+(?:p[bui]Var|pbVar|abStack_)'),
+    re.compile(r'^\s*(?:byte|word|int)\s+\*?(?:p[bui]Var|pbVar|abStack_)'),
     # extraout_ assignments
     re.compile(r'^\s*extraout_\w+\s*='),
     # CARRY artifacts from 32-bit arithmetic

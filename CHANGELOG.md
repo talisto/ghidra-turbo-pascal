@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-03-31
+
+### Added
+- `pascal_emit/body_converter.py`: extended NOISE_PATTERNS to match C pointer variable declarations with `*` (`byte *pbVar1;`, etc.) — previously only `byte pbVar1` (without `*`) was caught
+- `pascal_emit/pipeline.py`: extract `{ var ... }` declarations from main body into the program's `var` section — previously this extraction only ran for app functions, leaving main-block vars as commented lines
+
+### Fixed
+- `pascal_emit/pipeline.py`: prevent duplicate temp variable declarations in main body when both `{ var }` extraction and `_collect_undeclared_temps` find the same variable
+
+### Changed
+- RECORDS: 16 → 13 commented lines (-3)
+- PROCFUNC: 14 → 12 commented lines (-2)
+- OVRTEST: 2 → 1 commented lines (-1)
+- TYPECAST: 1 → 0 commented lines — now fully clean output
+- STRINGS: 26 → 25 commented lines (-1)
+- Compilation: 15/16 programs unchanged (93.75%), no regressions
+
 ## [2.18.0] - 2026-03-31
 
 ### Added

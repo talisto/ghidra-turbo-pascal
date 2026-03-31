@@ -538,13 +538,26 @@ def _process_ir(ir_data, decompiled_path, strings_path, output_path,
         }
         main_body = convert_function_body(body_text, strings_db, func_info, exe_reader)
 
-    # Collect undeclared temp vars from main body and add to globals
+    # Extract local variable declarations from main body
     main_temps = []
     if main_body:
+        clean_main_lines = []
+        for bline in main_body.split('\n'):
+            lv_match = re.match(r'\s*\{ var (\w+): (.+?); \}', bline)
+            if lv_match:
+                main_temps.append((lv_match.group(1), lv_match.group(2)))
+            else:
+                clean_main_lines.append(bline)
+        main_body = '\n'.join(clean_main_lines)
+
+    # Collect undeclared temp vars from main body and add to globals
+    if main_body:
         global_names = {f'g_{off[2:].zfill(4).upper()}' for off in globals_map}
+        declared_main = {t[0] for t in main_temps}
         for temp_name, temp_type in _collect_undeclared_temps(main_body):
-            if temp_name not in global_names:
+            if temp_name not in global_names and temp_name not in declared_main:
                 main_temps.append((temp_name, temp_type))
+                declared_main.add(temp_name)
 
     # Filter globals: only keep those actually referenced in converted Pascal
     all_pascal_text = main_body
