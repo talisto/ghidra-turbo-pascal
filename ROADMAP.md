@@ -28,7 +28,7 @@ The transpiler (`pascal_emit.py`) can emit `.pas` files, but they are **not comp
 | Arithmetic operators | ✅ Fixed | `div`, `mod`, `and`, `or`, `xor`, `not`, `shl`, `shr` |
 | Bitwise/logical operators | ✅ Fixed | `and`/`or`/`xor`/`not`/`shl`/`shr` converted |
 | For loops | ❌ Not implemented | Emitted as `{ for loop: ... }` comments |
-| Case statements | ❌ Not implemented | Emitted as if/else chains with inverted logic |
+| Case statements | ✅ Fixed | `if/else if` chains reconstructed to `case...of` with ranges |
 | String operations | ❌ Non-functional | String type lost; Concat/Copy/Pos/Length/Delete/Insert are raw calls |
 | Record types | ❌ Not recovered | Field access as `*(int *)(ptr + 0x15)` |
 | Nested procedures | ❌ Not recovered | Flattened to separate procedures with frame pointer params |
@@ -74,11 +74,15 @@ Ghidra emits for loops as C `for(init; cond; step)`. Currently emitted as commen
 - `for (local_N = START; local_N != END; local_N = local_N - 1)` → `for local_N := START downto END do`
 - Comma operator in condition (assignment in loop header): extract body assignment, emit before loop
 
-### 1.3 Fix Case Statement Reconstruction
+### 1.3 Fix Case Statement Reconstruction ✅
 
-Ghidra decompiles `case i of` as nested `if/else if` chains. The transpiler emits these verbatim, but the comparison direction is often inverted (Ghidra uses `<` where Pascal uses `>`).
+**Status**: Complete — `_reconstruct_case_statements()` post-processes Pascal output to detect if/else if chains comparing the same variable to integer constants and converts them to `case VAR of` blocks. Handles Ghidra's range complement pattern `(VAR < LO) or (HI < VAR)` → `LO..HI` with nested range support.
 
-**Approach:** Pattern-match chains of `if iVar = CONST then begin ... end else if iVar = CONST2 then begin ...` into `case iVar of CONST: ...; CONST2: ...;`. Also detect range patterns (`(iVar < 3) or (5 < iVar)` → complement of `3..5`).
+| Input Pattern | Output |
+|---------------|--------|
+| `if V = 1 then ... else if V = 2 then ...` | `case V of 1: ...; 2: ...; end;` |
+| `(V < 3) or (5 < V)` (complement) | `3..5: ...` (range case) |
+| Nested complements | Multiple range cases in single case statement |
 
 ### 1.4 Fix Variable Declarations ✅
 
@@ -275,14 +279,14 @@ The entry function contains system initialization code (runtime init, I/O init, 
 
 **Priority**: Medium | **Impact**: Confidence in output | **Difficulty**: Medium
 
-### 5.1 Compilation Testing with Free Pascal
+### 5.1 Compilation Testing with Free Pascal ✅
 
-Set up automated compilation testing:
-- Run `fpc -Mtp` (Turbo Pascal compatibility mode) on each generated `.pas` file
-- Collect and categorize compilation errors
-- Track "% of test programs that compile" as a metric
+**Status**: Complete — `tests/test_fpc_compilation.py` automatically compiles all generated `.pas` files with `fpc -Mtp` (Turbo Pascal mode). Regression protection for 8 currently-compiling programs, expected-failure tracking for 8 programs with known issues. Run with `pytest tests/test_fpc_compilation.py -v`.
 
-**Free Pascal is the practical target** — it's freely available, runs on modern systems, and has a TP7 compatibility mode. Actual TP7 requires DOSBox and is harder to automate.
+**Current compilation scorecard** (8/16 = 50%):
+| Compiles | Fails |
+|----------|-------|
+| HELLO, CONTROL, MATHOPS, CRTTEST, RANDTEST, TYPECAST, EXITPROC, OVRTEST | PROCFUNC, GAMESIM, STRINGS, DOSTEST, FILEIO, RECORDS, PTRMEM, DDTEST |
 
 ### 5.2 Behavioral Comparison Testing
 

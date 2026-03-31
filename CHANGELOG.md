@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-03-30
+
+### Added
+- `pascal_emit/body_converter.py`: case statement reconstruction from if/else if chains — detects patterns like `if VAR = 1 then ... else if VAR = 2 then ...` and converts to `case VAR of 1: ...; 2: ...; end;`. Also handles Ghidra's range complement pattern `(VAR < LO) or (HI < VAR)` → `LO..HI` with nested range support
+- `tests/test_fpc_compilation.py`: automated Free Pascal compilation testing — compiles all generated `.pas` files with `fpc -Mtp` and tracks which compile (8/16 currently). Regression protection for compiling programs, expected-failure tracking for the rest
+- `tests/test_pascal_emit.py`: 10 new tests for case statement reconstruction validating CONTROL (equality cases, range cases 3..5 and 6..10, else clause) and RANDTEST (sequential case values 0-5)
+
 ## [2.3.0] - 2026-03-30
 
 ### Added
@@ -207,7 +214,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `label_functions.py`: system segment detection now uses core offset counting instead of fixed markers (`3fca`/`3f65`) for broader compatibility
 - `label_functions.py`: FLIRT description table expanded with `t1`-style mangled names (e.g., `_GotoXY_q4Bytet1`)
 
-[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.0.0...v2.1.0

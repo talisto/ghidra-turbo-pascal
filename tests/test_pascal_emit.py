@@ -478,6 +478,83 @@ class TestTempVarDeclarations:
 
 
 # ────────────────────────────────────────────────────────────────
+# Case statement reconstruction
+# ────────────────────────────────────────────────────────────────
+
+class TestCaseStatements:
+    """Test case statement reconstruction from if/else if chains."""
+
+    def test_control_has_case(self):
+        """CONTROL.pas must reconstruct 'case iVar1 of'."""
+        pas = _read_pas('CONTROL')
+        assert 'case iVar1 of' in pas
+
+    def test_control_case_value_1(self):
+        """Case value 1 maps to 'one'."""
+        pas = _read_pas('CONTROL')
+        assert re.search(r"1:\s*WriteLn\('one'\)", pas)
+
+    def test_control_case_value_2(self):
+        """Case value 2 maps to 'two'."""
+        pas = _read_pas('CONTROL')
+        assert re.search(r"2:\s*WriteLn\('two'\)", pas)
+
+    def test_control_case_range_3_5(self):
+        """Range 3..5 maps to 'three to five'."""
+        pas = _read_pas('CONTROL')
+        assert re.search(r"3\.\.5:\s*WriteLn\('three to five'\)", pas)
+
+    def test_control_case_range_6_10(self):
+        """Range 6..10 maps to 'six to ten'."""
+        pas = _read_pas('CONTROL')
+        assert re.search(r"6\.\.10:\s*WriteLn\('six to ten'\)", pas)
+
+    def test_control_case_else(self):
+        """Case else clause maps to 'other'."""
+        pas = _read_pas('CONTROL')
+        # Find the case block, verify else contains 'other'
+        case_start = pas.find('case iVar1 of')
+        assert case_start >= 0
+        case_block = pas[case_start:pas.find('end;', case_start + 50) + 4]
+        assert 'else' in case_block
+        assert "'other'" in case_block
+
+    def test_control_no_if_else_chain_for_case(self):
+        """The case values should NOT appear as if/else if chain."""
+        pas = _read_pas('CONTROL')
+        # After case reconstruction, there should be no
+        # "if iVar1 = 1 then begin" pattern
+        assert 'if iVar1 = 1 then begin' not in pas
+
+    def test_randtest_has_case(self):
+        """RANDTEST event handler uses case statement."""
+        pas = _read_pas('RANDTEST')
+        assert 'case iVar1 of' in pas
+
+    def test_randtest_case_values(self):
+        """RANDTEST case has sequential values 0-5."""
+        pas = _read_pas('RANDTEST')
+        assert re.search(r"0:\s*WriteLn\('You found gold!'\)", pas)
+        assert re.search(r"5:\s*WriteLn\('A trap springs!'\)", pas)
+
+    def test_case_compiles(self):
+        """CONTROL with case statement still compiles with FPC."""
+        import shutil
+        fpc = shutil.which('fpc')
+        if not fpc:
+            pytest.skip('fpc not installed')
+        import subprocess, tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run(
+                [fpc, '-Mtp', '-Sc',
+                 '-o' + os.path.join(tmpdir, 'out'),
+                 os.path.join(OUTPUT_DIR, 'CONTROL', 'CONTROL.pas')],
+                capture_output=True, text=True, timeout=30
+            )
+            assert result.returncode == 0, f'FPC failed:\n{result.stdout}\n{result.stderr}'
+
+
+# ────────────────────────────────────────────────────────────────
 # Helpers
 # ────────────────────────────────────────────────────────────────
 

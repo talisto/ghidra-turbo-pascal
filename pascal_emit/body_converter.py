@@ -95,6 +95,315 @@ def is_system_init_line(line):
     return False
 
 
+# ── Case statement reconstruction ──
+
+# Matches:  if VAR = CONST then begin
+_CASE_IF_RE = re.compile(r'^(\s*)if\s+(\w+)\s*=\s*(\d+)\s+then\s+begin\s*$')
+# Matches:  end else if VAR = CONST then begin
+_CASE_ELIF_RE = re.compile(r'^(\s*)end\s+else\s+if\s+(\w+)\s*=\s*(\d+)\s+then\s+begin\s*$')
+# Matches:  end else if (VAR < LO) or (HI < VAR) then begin
+_CASE_RANGE_COMPLEMENT_RE = re.compile(
+    r'^(\s*)end\s+else\s+if\s+\((\w+)\s*<\s*(\d+)\)\s+or\s+\((\d+)\s*<\s*\2\)\s+then\s+begin\s*$'
+)
+# Matches:  end else begin
+_CASE_ELSE_RE = re.compile(r'^(\s*)end\s+else\s+begin\s*$')
+# Matches:  end;
+_CASE_END_RE = re.compile(r'^(\s*)end;\s*$')
+
+
+def _reconstruct_case_statements(lines):
+    """Post-process Pascal lines to convert if/else if chains to case statements.
+
+    Detects patterns like:
+        if VAR = 1 then begin ... end else if VAR = 2 then begin ... end;
+    And converts to:
+        case VAR of 1: begin ... end; 2: begin ... end; end;
+
+    Also handles Ghidra's range complement pattern:
+        end else if (VAR < 3) or (5 < VAR) then begin
+    which means "NOT in range 3..5", so the else branch IS the range case.
+    """
+    result = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = _CASE_IF_RE.match(line)
+        if not m:
+            result.append(line)
+            i += 1
+            continue
+
+        indent = m.group(1)
+        case_var = m.group(2)
+        first_val = m.group(3)
+
+        # Collect entire if/else chain
+        chain = _collect_case_chain(lines, i, indent, case_var)
+
+        if chain is None or len(chain['branches']) < 2:
+            # Not a meaningful case chain (need at least 2 branches)
+            result.append(line)
+            i += 1
+            continue
+
+        # Emit case statement
+        result.append(f'{indent}case {case_var} of')
+        for branch in chain['branches']:
+            label = branch['label']
+            body = branch['body']
+            if len(body) == 1:
+                # Single statement — emit on same line
+                stmt = body[0].strip().rstrip(';')
+                result.append(f'{indent}  {label}: {stmt};')
+            else:
+                result.append(f'{indent}  {label}: begin')
+                for bline in body:
+                    result.append(f'{indent}  {bline.rstrip()}')
+                result.append(f'{indent}  end;')
+
+        if chain['else_body']:
+            result.append(f'{indent}else')
+            if len(chain['else_body']) == 1:
+                stmt = chain['else_body'][0].strip().rstrip(';')
+                result.append(f'{indent}  {stmt};')
+            else:
+                result.append(f'{indent}  begin')
+                for bline in chain['else_body']:
+                    result.append(f'{indent}  {bline.rstrip()}')
+                result.append(f'{indent}  end;')
+
+        result.append(f'{indent}end;')
+        i = chain['end_index']
+        continue
+
+    return result
+
+
+def _collect_case_chain(lines, start, indent, case_var):
+    """Collect an if/else if chain comparing case_var to integer constants.
+
+    Returns dict with:
+        branches: list of {label: str, body: list[str]}
+        else_body: list[str] or None
+        end_index: int (next line index after the chain)
+    Or None if the chain doesn't match.
+    """
+    branches = []
+    else_body = None
+    i = start
+
+    # First branch: if VAR = CONST then begin
+    m = _CASE_IF_RE.match(lines[i])
+    if not m or m.group(2) != case_var:
+        return None
+
+    first_val = m.group(3)
+    i += 1
+    body, i = _collect_branch_body(lines, i, indent)
+    branches.append({'label': first_val, 'body': body})
+
+    # Subsequent branches: end else if ...
+    while i < len(lines):
+        line = lines[i]
+
+        # end else if VAR = CONST then begin
+        m = _CASE_ELIF_RE.match(line)
+        if m and m.group(2) == case_var:
+            i += 1
+            body, i = _collect_branch_body(lines, i, indent)
+            branches.append({'label': m.group(3), 'body': body})
+            continue
+
+        # end else if (VAR < LO) or (HI < VAR) then begin — range complement
+        m = _CASE_RANGE_COMPLEMENT_RE.match(line)
+        if m and m.group(2) == case_var:
+            lo = int(m.group(3))
+            hi = int(m.group(4))
+            # This branch is for NOT in range LO..HI
+            # The else of this branch IS the range case
+            i += 1
+            not_range_body, i = _collect_complement_branch(lines, i, indent)
+
+            if not_range_body is not None:
+                # not_range_body has two parts: the "not range" body and the "range" body
+                complement_body = not_range_body['outer_body']
+                range_body = not_range_body['inner_body']
+
+                if range_body is not None:
+                    # The inner (else) body is the range case
+                    branches.append({'label': f'{lo}..{hi}', 'body': range_body})
+                    # The outer body is the else/other handler
+                    if complement_body:
+                        # Check for nested range pattern in complement body
+                        nested = _try_nested_range(complement_body, indent, case_var)
+                        if nested:
+                            branches.extend(nested['branches'])
+                            if nested['else_body']:
+                                else_body = nested['else_body']
+                        else:
+                            else_body = complement_body
+                else:
+                    else_body = complement_body
+            continue
+
+        # end else begin — else clause
+        m = _CASE_ELSE_RE.match(line)
+        if m:
+            i += 1
+            body, i = _collect_branch_body(lines, i, indent)
+            else_body = body
+            continue
+
+        # end; — end of chain
+        m = _CASE_END_RE.match(line)
+        if m and _indent_level(line) == _indent_level(lines[start]):
+            i += 1
+            break
+        else:
+            break
+
+    return {
+        'branches': branches,
+        'else_body': else_body,
+        'end_index': i,
+    }
+
+
+def _collect_branch_body(lines, i, base_indent):
+    """Collect lines until we hit a matching end/else at the same indentation level.
+
+    Returns (body_lines, next_index).
+    """
+    body = []
+    depth = 1  # we're inside a begin block
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Check end FIRST — if it closes the current block, stop before
+        # counting any begin on the same line (e.g., "end else if ... begin")
+        if re.match(r'^end\b', stripped):
+            depth -= 1
+            if depth == 0:
+                return body, i
+
+        if re.search(r'\bbegin\b', stripped):
+            depth += 1
+
+        body.append(line)
+        i += 1
+
+    return body, i
+
+
+def _collect_complement_branch(lines, i, base_indent):
+    """Collect a range complement branch (the NOT-in-range branch).
+
+    This branch has the pattern:
+        [outer body]
+        end else begin     ← the range case body
+        [inner body]
+        end;
+
+    Returns (result_dict, next_index) where result_dict has outer_body and inner_body.
+    """
+    outer_body = []
+    inner_body = None
+    depth = 1
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        if re.match(r'^end\b', stripped):
+            depth -= 1
+            if depth == 0:
+                # Check if it's "end else begin" (inner range case)
+                if _CASE_ELSE_RE.match(line):
+                    depth = 1
+                    i += 1
+                    inner_body, i = _collect_branch_body(lines, i, base_indent)
+                    return {'outer_body': outer_body, 'inner_body': inner_body}, i
+                # Or just "end;" — no inner branch
+                return {'outer_body': outer_body, 'inner_body': None}, i
+
+        if re.search(r'\bbegin\b', stripped):
+            depth += 1
+
+        outer_body.append(line)
+        i += 1
+
+    return {'outer_body': outer_body, 'inner_body': None}, i
+
+
+def _try_nested_range(body_lines, indent, case_var):
+    """Check if body_lines contain a nested range complement pattern.
+
+    Pattern: if (VAR < LO) or (HI < VAR) then begin ... end else begin ... end;
+    """
+    if not body_lines:
+        return None
+    first = body_lines[0].strip()
+    m = re.match(
+        r'if\s+\((' + re.escape(case_var) + r')\s*<\s*(\d+)\)\s+or\s+\((\d+)\s*<\s*\1\)\s+then\s+begin\s*$',
+        first
+    )
+    if not m:
+        return None
+
+    lo = int(m.group(2))
+    hi = int(m.group(3))
+
+    # Parse the nested structure
+    branches = []
+    i = 1
+    outer_body = []
+    inner_body = None
+    depth = 1
+
+    while i < len(body_lines):
+        line = body_lines[i]
+        stripped = line.strip()
+
+        if re.match(r'^end\b', stripped):
+            depth -= 1
+            if depth == 0:
+                if _CASE_ELSE_RE.match(line):
+                    depth = 1
+                    i += 1
+                    while i < len(body_lines):
+                        line2 = body_lines[i]
+                        stripped2 = line2.strip()
+                        if re.match(r'^end\b', stripped2):
+                            depth -= 1
+                            if depth == 0:
+                                break
+                        if re.search(r'\bbegin\b', stripped2):
+                            depth += 1
+                        inner_body = inner_body or []
+                        inner_body.append(line2)
+                        i += 1
+                    break
+                break
+
+        if re.search(r'\bbegin\b', stripped):
+            depth += 1
+
+        outer_body.append(line)
+        i += 1
+
+    if inner_body is not None:
+        branches.append({'label': f'{lo}..{hi}', 'body': inner_body})
+        return {'branches': branches, 'else_body': outer_body if outer_body else None}
+
+    return None
+
+
+def _indent_level(line):
+    """Return the indentation level (number of leading spaces)."""
+    return len(line) - len(line.lstrip())
+
+
 # ── For loop patterns ──
 # Pattern: for (VAR = START; ..., VAR != END; VAR = VAR + 1)
 _FOR_UP_RE = re.compile(
@@ -306,6 +615,9 @@ def convert_function_body(body, strings_db, func_info, exe_reader=None):
 
     while result and not result[-1].strip():
         result.pop()
+
+    # Phase 5: Reconstruct case statements from if/else if chains
+    result = _reconstruct_case_statements(result)
 
     return '\n'.join(result) if result else '  { empty }'
 
