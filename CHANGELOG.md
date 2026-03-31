@@ -43,8 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - RECORDS: 8 → 6 `{???}` placeholders (hex width fix resolved `'Name'` and `'-----'` column headers)
-- Total commented lines across all programs: 34 (unchanged)
+- Total commented lines across all programs: 34 → 30 (4 lines fixed)
+- FILEIO: 4 → 1 commented lines (bp_str_long handler, BP7 concat sequence merger)
 - Total `{???}` placeholders: 21 → 19 (RECORDS hex width fix)
+
+### Added
+- `pascal_emit/body_converter.py`: `bp_str_long` handler — converts `bp_str_long(maxlen, destOff, seg, 0, value, value >> 0xf)` to `Str(value, g_DEST)` (integer-to-string conversion)
+- `pascal_emit/body_converter.py`: `_merge_bp_concat_sequences()` — sequence recognizer for BP7 string concatenation: detects `bp_str_assign(src,seg) + bp_concat(off,seg) + bp_str_assign_n(...)` and merges into `g_DEST := 'literal' + g_SRC;`
+- `pascal_emit/body_converter.py`: Pascal `:=` passthrough in `convert_c_line` — lines already in Pascal syntax (from sequence mergers) pass through without re-conversion
 
 ## [2.24.0] - 2026-03-31
 

@@ -658,6 +658,90 @@ _STR_CONCAT_PTRSET_RE = re.compile(
 _STR_CONCAT_SEGSET_RE = re.compile(
     r'^\s*uVar\d+\s*=\s*unaff_\w+\s*;')
 
+# Patterns for BP7 string concat sequences:
+# bp_str_assign(src_off, seg) → bp_concat(off, seg) → bp_str_assign_n(...)
+_BP_CONCAT_ASSIGN_RE = re.compile(
+    r'^\s*(?:bp_str_assign|__basg_qm6Stringt1)\s*\(\s*'
+    r'(0x[0-9a-f]+|\d+)\s*,\s*(0x[0-9a-f]+|\w+)\s*\)\s*;')
+_BP_CONCAT_CONCAT_RE = re.compile(
+    r'^\s*(?:bp_concat|_Concat_qm6Stringt1)\s*\(\s*'
+    r'(0x[0-9a-f]+|\d+)\s*,\s*(0x[0-9a-f]+|\w+)\s*\)\s*;')
+_BP_CONCAT_ASSIGN_N_RE = re.compile(
+    r'^\s*(?:bp_str_assign_n|__basg_qm6Stringt14Byte)\s*\(\s*'
+    r'\w+\s*,\s*(0x[0-9a-f]+|\d+)')
+_BP_CONCAT_NOISE_RE = re.compile(
+    r'^\s*(?:puVar\d+|pbVar\d+|uVar\d+)\s*=\s*')
+
+
+def _merge_bp_concat_sequences(lines, func_info, exe_reader):
+    """Merge BP7 string concat sequences into single assignments.
+
+    Detects:
+        bp_str_assign(src_off, src_seg);       — string literal to temp
+        bp_concat(append_off, append_seg);     — append onto temp
+        bp_str_assign_n(maxlen, dest_off, ...); — copy result (optional)
+
+    Replaces with:
+        g_DEST := 'STRING' + g_APPEND;
+    """
+    result = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        m = _BP_CONCAT_ASSIGN_RE.match(stripped)
+        if m:
+            src_off_str = m.group(1)
+            src_seg_str = m.group(2)
+
+            # Resolve the string literal
+            string_part = _resolve_concat_part(src_off_str, src_seg_str,
+                                               func_info, exe_reader)
+            if string_part is not None and string_part.startswith("'"):
+                # Look ahead past noise for bp_concat
+                j = i + 1
+                while j < len(lines) and _BP_CONCAT_NOISE_RE.match(lines[j].strip()):
+                    j += 1
+                if j < len(lines):
+                    cm = _BP_CONCAT_CONCAT_RE.match(lines[j].strip())
+                    if cm:
+                        concat_off = cm.group(1)
+                        try:
+                            off_int = int(concat_off, 16) if concat_off.startswith('0x') else int(concat_off)
+                            append_var = f'g_{off_int:04X}'
+                        except ValueError:
+                            append_var = concat_off
+
+                        # Look ahead for optional bp_str_assign_n
+                        k = j + 1
+                        while k < len(lines) and _BP_CONCAT_NOISE_RE.match(lines[k].strip()):
+                            k += 1
+                        final_dest = append_var
+                        if k < len(lines):
+                            nm = _BP_CONCAT_ASSIGN_N_RE.match(lines[k].strip())
+                            if nm:
+                                final_off = nm.group(1)
+                                try:
+                                    final_int = int(final_off, 16) if final_off.startswith('0x') else int(final_off)
+                                    final_dest = f'g_{final_int:04X}'
+                                except ValueError:
+                                    pass
+                                k += 1
+
+                        indent = line[:len(line) - len(line.lstrip())]
+                        merged = f'{indent}{final_dest} := {string_part} + {append_var};'
+                        for _ in range(i, k):
+                            result.append('')
+                        result[-1] = merged
+                        i = k
+                        continue
+
+        result.append(line)
+        i += 1
+
+    return result
+
 
 def _resolve_concat_part(offset_str, seg_str, func_info, exe_reader):
     """Resolve a string concat part to either a string literal or global var name.
@@ -794,6 +878,10 @@ def convert_function_body(body, strings_db, func_info, exe_reader=None):
     # Phase 0.5: Detect and merge DDPlus string concatenation sequences
     # Pattern: [puVar=local] [uVar=seg] bp_delete(off,seg) bp_str_append(...)* ddp_swriteln(puVar,uVar)
     lines = _merge_string_concat_sequences(lines, func_info, exe_reader)
+
+    # Phase 0.6: Detect and merge BP7 string concat sequences
+    # Pattern: bp_str_assign(src,seg) bp_concat(off,seg) [bp_str_assign_n(...)]
+    lines = _merge_bp_concat_sequences(lines, func_info, exe_reader)
 
     # Phase 1: Detect and convert Write/WriteLn sequences
     write_seqs = detect_write_sequences(lines, strings_db, exe_reader)
@@ -1156,6 +1244,10 @@ def convert_c_line(line, func_info):
     if line == ';':
         return None
 
+    # Lines already in Pascal syntax (from sequence mergers) — pass through
+    if ':=' in line and '(' not in line:
+        return f'{indent}{line}'
+
     # Return statement with value (function result) — must be before var_decl
     ret_match = re.match(r'^return\s+(.+?)\s*;$', line)
     if ret_match:
@@ -1359,7 +1451,7 @@ def convert_c_line(line, func_info):
         # skip as noise since we can't reconstruct the operation
         _BP_STRING_OPS = {
             'bp_str_assign_n', 'bp_str_assign', 'bp_concat',
-            'bp_copy', 'bp_str_long', 'bp_insert', 'bp_str_append',
+            'bp_copy', 'bp_insert', 'bp_str_append',
         }
         if fname in _BP_STRING_OPS:
             args_match = re.search(r'\((.+)\)', line)
@@ -1414,6 +1506,25 @@ def convert_c_line(line, func_info):
             args_match = re.search(r'\((.+)\)', line)
             if not args_match:
                 return None  # no-arg → noise
+            return f'{indent}{{ {line} }}'
+        # bp_str_long: Str(longint, dest) — convert integer to string
+        # Pattern: bp_str_long(maxlen, destOff, seg, 0, value, value >> 0xf)
+        if fname == 'bp_str_long':
+            args_match = re.search(r'\((.+)\)', line)
+            if not args_match:
+                return None  # No args — stack-based call, skip as noise
+            parts = [a.strip() for a in args_match.group(1).split(',')]
+            if len(parts) >= 5 and parts[1].startswith('0x'):
+                dest_off = parts[1]
+                var_name = f'g_{dest_off[2:].zfill(4).upper()}'
+                # Value arg is parts[4]; skip sign-extension (parts[5])
+                value = parts[4]
+                # Convert *(int *)0xNN to g_NN
+                value = re.sub(
+                    r'\*\(int \*\)(0x[0-9a-f]+)',
+                    lambda m: f'g_{m.group(1)[2:].zfill(4).upper()}',
+                    value)
+                return f'{indent}Str({value}, {var_name});'
             return f'{indent}{{ {line} }}'
         # bp_erase: file deletion — convert to Erase
         if fname == 'bp_erase':
