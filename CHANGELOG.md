@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-03-30
+
 ### Fixed
 - `pascal_emit/expressions.py`: memory access expressions with hex offsets (`*(int *)(var + 0x15)`) now correctly convert to Pascal indexed access (`var[21]`) — offset patterns accept both hex and decimal, and `_convert_atomic_condition` handles them identically
 - `pascal_emit/write_sequences.py`: `WRITE_LONGINT_ARGS_RE` third argument now handles nested parentheses in expressions (uses `.+` instead of `[^)]+`)
@@ -248,7 +250,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `label_functions.py`: system segment detection now uses core offset counting instead of fixed markers (`3fca`/`3f65`) for broader compatibility
 - `label_functions.py`: FLIRT description table expanded with `t1`-style mangled names (e.g., `_GotoXY_q4Bytet1`)
 
-[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.7.0...HEAD
+[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.8.0...HEAD
+[2.8.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.4.0...v2.5.0
