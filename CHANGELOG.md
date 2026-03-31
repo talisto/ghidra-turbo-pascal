@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-03-30
+
 ### Added
 - `pascal_emit/body_converter.py`: orphaned `end;` detection and commenting — when `_sanitize_ghidra_artifacts` comments out a line containing `begin` (e.g., `if ... then begin` with leaked identifiers), the matching `end;` is now also commented out to prevent structural imbalances. Handles `case ... of` and compound lines like `end else if ... then begin`
 - `pascal_emit/body_converter.py`: expanded leaked identifier patterns — now catches `DAT_XXXX_XXXX` (data references), `FUN_XXXX_XXXX` (unlabeled function calls), and `dos_*` (undeclared DOS unit functions) in addition to existing patterns
@@ -228,7 +230,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `label_functions.py`: system segment detection now uses core offset counting instead of fixed markers (`3fca`/`3f65`) for broader compatibility
 - `label_functions.py`: FLIRT description table expanded with `t1`-style mangled names (e.g., `_GotoXY_q4Bytet1`)
 
-[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.1.0...v2.2.0
