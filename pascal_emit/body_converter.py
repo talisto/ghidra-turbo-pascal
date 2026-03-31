@@ -1152,6 +1152,10 @@ def convert_c_line(line, func_info):
     original_line = line
     line = _C_COMMENT_RE.sub('', line).strip()
 
+    # Lone semicolons (orphaned from multi-line statements) — skip
+    if line == ';':
+        return None
+
     # Return statement with value (function result) — must be before var_decl
     ret_match = re.match(r'^return\s+(.+?)\s*;$', line)
     if ret_match:
