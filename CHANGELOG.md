@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-03-30
+
 ### Fixed
 - `pascal_emit/pipeline.py`: pointer type parameters (`byte *32`, `int *32`) no longer misinterpreted as array types — pointer size suffix is now stripped separately from the base type, preventing `byte *32` → `array[0..31] of Byte` → `Pointer` cascade
 - `pascal_emit/expressions.py`: `&&` in conditions at non-zero parenthesis depth (inside C pointer casts) no longer produces `and and` — `_convert_atomic_condition` now replaces `&&`/`||` before single-char `&`/`|`, and `convert_condition` strips outer parentheses in a loop to handle nested redundant parens from Ghidra's decompiler output
@@ -234,7 +236,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `label_functions.py`: system segment detection now uses core offset counting instead of fixed markers (`3fca`/`3f65`) for broader compatibility
 - `label_functions.py`: FLIRT description table expanded with `t1`-style mangled names (e.g., `_GotoXY_q4Bytet1`)
 
-[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/talisto/ghidra-turbo-pascal/compare/v2.2.0...v2.3.0
